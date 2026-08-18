@@ -1,0 +1,654 @@
+# Copyright 2025 The HuggingFace Inc. team. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""Local-only validation and metadata extraction for materialized LeRobot datasets.
+
+Validation follows the reader's actual contract without decoding media or contacting a remote
+store: metadata must parse, frame parquet must match the declared schema, referenced payloads must
+stay inside the artifact root, and frame/task/episode indices must agree.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import math
+from dataclasses import dataclass
+from numbers import Integral
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+import datasets
+import pandas as pd
+import pyarrow.parquet as pq
+from huggingface_hub.constants import CONFIG_NAME, SAFETENSORS_SINGLE_FILE
+
+from . import lerobot_adapter as _lerobot
+
+if TYPE_CHECKING:
+    from lerobot.datasets.utils import DatasetInfo
+
+_TIMESTAMP_TOLERANCE_S = 1e-4
+
+# PEFT saves an adapter, not a full model, via `peft_model.save_pretrained(...)`. These filenames
+# are hardcoded rather than imported from `peft` because `peft` is an optional `lerobot[peft]`
+# extra, and importing it here would break directory inspection for every base-install user.
+PEFT_ADAPTER_CONFIG_NAME = "adapter_config.json"
+PEFT_ADAPTER_WEIGHTS_NAME = "adapter_model.safetensors"
+
+
+class DatasetDirectoryError(ValueError):
+    """A local directory is not a complete, readable LeRobot dataset."""
+
+
+@dataclass(frozen=True, slots=True)
+class DatasetDirectoryMetadata:
+    """Metadata extracted from a validated local dataset directory."""
+
+    schema_version: str
+    robot_type: str | None
+    fps: int
+    total_episodes: int
+    total_frames: int
+    total_tasks: int
+    camera_keys: tuple[str, ...]
+    video_keys: tuple[str, ...]
+    git_commit: str | None
+
+    def to_wandb_metadata(self) -> dict[str, Any]:
+        """JSON-safe dict form, suitable for a W&B Artifact's ``metadata`` argument."""
+        return {
+            "schema_version": self.schema_version,
+            "dataset_schema_version": self.schema_version,
+            "robot_type": self.robot_type,
+            "fps": self.fps,
+            "total_episodes": self.total_episodes,
+            "total_frames": self.total_frames,
+            "total_tasks": self.total_tasks,
+            "camera_keys": list(self.camera_keys),
+            "video_keys": list(self.video_keys),
+            "git_commit": self.git_commit,
+        }
+
+
+def validate_dataset_directory(root: Path | str) -> DatasetInfo:
+    """Prove that ``root`` is locally consumable by LeRobot without remote fallback."""
+    root = Path(root)
+    if not root.is_dir():
+        raise DatasetDirectoryError(f"{root} is not a directory.")
+
+    missing = [path for path in (_lerobot.INFO_PATH, _lerobot.STATS_PATH) if not (root / path).is_file()]
+    if not (root / _lerobot.DATA_DIR).is_dir():
+        missing.append(f"{_lerobot.DATA_DIR}/")
+    if missing:
+        raise DatasetDirectoryError(
+            f"{root} is missing required dataset file(s)/directory(ies): {', '.join(missing)}."
+        )
+
+    info = _read_info(root)
+    frame_features = _frame_features(root, info)
+    _read_stats(root)
+    tasks = _read_tasks(root, info)
+    episodes = _read_episodes(root, info)
+    _validate_payloads(root, info, episodes)
+    frames = _read_frames(root, info, frame_features)
+    _validate_frame_metadata(root, info, tasks, episodes, frames)
+    return info
+
+
+def inspect_dataset_directory(root: Path | str) -> DatasetDirectoryMetadata:
+    """Validate ``root`` and extract its self-describing metadata."""
+    root = Path(root)
+    info = validate_dataset_directory(root)
+    camera_keys = tuple(sorted(key for key, ft in info.features.items() if ft["dtype"] in ("image", "video")))
+    video_keys = tuple(sorted(key for key, ft in info.features.items() if ft["dtype"] == "video"))
+    return DatasetDirectoryMetadata(
+        schema_version=info.codebase_version,
+        robot_type=info.robot_type,
+        fps=info.fps,
+        total_episodes=info.total_episodes,
+        total_frames=info.total_frames,
+        total_tasks=info.total_tasks,
+        camera_keys=camera_keys,
+        video_keys=video_keys,
+        git_commit=_lerobot.lerobot_git_commit(),
+    )
+
+
+class ModelDirectoryError(ValueError):
+    """A local directory is not a loadable LeRobot policy checkpoint."""
+
+
+@dataclass(frozen=True, slots=True)
+class ModelDirectoryMetadata:
+    """Metadata extracted from a validated local model directory."""
+
+    has_full_weights: bool
+    has_adapter_weights: bool
+    policy_type: str | None
+    git_commit: str | None
+    # A PEFT adapter alone can't be rolled out: the base model it was trained against is resolved
+    # from `base_model_name_or_path` in adapter_config.json, not bundled in this artifact. These two
+    # fields make that visible (in the W&B UI, via `to_wandb_metadata()`) rather than only in a log
+    # line — see the adapter-only branch of `inspect_model_directory`.
+    is_self_contained: bool
+    base_model_name_or_path: str | None
+
+    def to_wandb_metadata(self) -> dict[str, Any]:
+        """JSON-safe dict form, suitable for a W&B Artifact's ``metadata`` argument."""
+        return {
+            "has_full_weights": self.has_full_weights,
+            "has_adapter_weights": self.has_adapter_weights,
+            "policy_type": self.policy_type,
+            "git_commit": self.git_commit,
+            "is_self_contained": self.is_self_contained,
+            "base_model_name_or_path": _publishable_base_model_name(self.base_model_name_or_path),
+        }
+
+
+def _publishable_base_model_name(base_model_name_or_path: str | None) -> str | None:
+    """``base_model_name_or_path`` with a machine-local path replaced by a non-identifying stand-in.
+
+    A PEFT base is either a Hub repo id (``lerobot/pi0``) or a path on the training machine. The
+    second is the uploader's filesystem layout, so it stops at this boundary: the dataclass keeps
+    the real value, since callers on that machine need it, while everything published to W&B —
+    artifact metadata and the refusal reason stored beside it — gets the stand-in. The full path
+    is already in the warning ``inspect_model_directory`` logs, which is where it is actionable.
+    """
+    if base_model_name_or_path is None:
+        return None
+    if Path(base_model_name_or_path).is_absolute():
+        return "a local path on the uploading machine"
+    return base_model_name_or_path
+
+
+def registry_link_refusal(*, is_self_contained: bool, base_model_name_or_path: str | None) -> str | None:
+    """Why this model must not be linked into the Registry, or ``None`` if it may be.
+
+    A Registry collection is where a team looks for something deployable. An adapter-only
+    checkpoint whose base model isn't bundled cannot be rolled out from the artifact alone — the
+    base is resolved from ``base_model_name_or_path`` at load time, off the network or off a path
+    that only exists on the training machine — so linking it would put an undeployable version
+    where deployable ones live. The artifact still uploads; only the Registry claim is refused.
+
+    Takes the two values it judges rather than a :class:`ModelDirectoryMetadata`, because the same
+    rule has to apply to a version that was never inspected locally: ``model promote`` reads
+    ``is_self_contained`` off a remote artifact's file manifest and its base model off that
+    artifact's stored metadata. One rule, two ways of learning its inputs.
+
+    The returned string is stored in artifact metadata by its callers, so it names the base model
+    through :func:`_publishable_base_model_name` rather than verbatim.
+    """
+    if is_self_contained:
+        return None
+    base_model = _publishable_base_model_name(base_model_name_or_path) or "undeclared"
+    return (
+        f"the checkpoint has only PEFT adapter weights and its base model ({base_model}) is not "
+        "bundled, so the artifact cannot be rolled out on its own"
+    )
+
+
+def validate_model_directory(root: Path | str) -> dict[str, Any] | None:
+    """Prove that ``root`` is a locally loadable LeRobot policy checkpoint.
+
+    Checks only file *existence*, never opening or parsing a weights file: ``root`` must contain
+    ``config.json`` plus either full weights (``model.safetensors``) or a complete PEFT adapter pair
+    (``adapter_config.json`` and ``adapter_model.safetensors``). Optional processor files and
+    ``train_config.json`` — and any other extra content — are tolerated and ignored.
+
+    Returns the parsed contents of ``config.json`` (best-effort — ``None`` if it isn't valid JSON or
+    isn't a JSON object), so a caller like :func:`inspect_model_directory` doesn't need to re-read it.
+    """
+    root = Path(root)
+    if not root.is_dir():
+        raise ModelDirectoryError(f"{root} is not a directory.")
+
+    config_path = root / CONFIG_NAME
+    if not config_path.is_file():
+        raise ModelDirectoryError(f"{root} is missing required model config file: {CONFIG_NAME}.")
+
+    has_full_weights = (root / SAFETENSORS_SINGLE_FILE).is_file()
+    has_adapter_weights = (root / PEFT_ADAPTER_CONFIG_NAME).is_file() and (
+        root / PEFT_ADAPTER_WEIGHTS_NAME
+    ).is_file()
+    if not has_full_weights and not has_adapter_weights:
+        raise ModelDirectoryError(
+            f"{root} has {CONFIG_NAME} but no model weights: expected either {SAFETENSORS_SINGLE_FILE} "
+            f"(full weights) or both {PEFT_ADAPTER_CONFIG_NAME} and {PEFT_ADAPTER_WEIGHTS_NAME} "
+            "(PEFT adapter weights)."
+        )
+
+    try:
+        with config_path.open() as f:
+            config = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return config if isinstance(config, dict) else None
+
+
+def inspect_model_directory(root: Path | str) -> ModelDirectoryMetadata:
+    """Validate ``root`` and extract its self-describing metadata."""
+    root = Path(root)
+    config = validate_model_directory(root)
+    policy_type = config.get("type") if config is not None else None
+
+    has_full_weights = (root / SAFETENSORS_SINGLE_FILE).is_file()
+    has_adapter_weights = (root / PEFT_ADAPTER_CONFIG_NAME).is_file() and (
+        root / PEFT_ADAPTER_WEIGHTS_NAME
+    ).is_file()
+
+    is_self_contained = has_full_weights
+    base_model_name_or_path = None
+    if not has_full_weights and has_adapter_weights:
+        # An adapter-only checkpoint is never self-contained, and not for want of bundling:
+        # `make_policy` hands `adapter_config.json`'s `base_model_name_or_path` to
+        # `from_pretrained` verbatim (see `policies/factory.py`) without rebasing it on the
+        # directory the adapter was loaded from. A base model copied inside `root` is therefore
+        # still looked up at the uploader's own path — exactly what the downloading machine lacks.
+        # Bundling can only start to work once the loader resolves that reference relative to the
+        # adapter directory.
+        base_model_name_or_path = _adapter_base_model_name(root)
+        logging.warning(
+            "%s contains only PEFT adapter weights, not the base model it was trained against. "
+            "Base model %s is resolved verbatim from adapter_config.json at load time, so whatever "
+            "machine downloads this artifact must already have it at that exact reference, or "
+            "loading will fail (or, if it is a Hub repo id, silently fetch from the network). "
+            "Copying the base model into this directory does not help: the stored reference is not "
+            "rewritten on download.",
+            root,
+            base_model_name_or_path
+            if base_model_name_or_path is not None
+            else "(could not be determined: adapter_config.json is missing, unreadable, or has "
+            "no base_model_name_or_path)",
+        )
+
+    return ModelDirectoryMetadata(
+        has_full_weights=has_full_weights,
+        has_adapter_weights=has_adapter_weights,
+        policy_type=policy_type if isinstance(policy_type, str) else None,
+        git_commit=_lerobot.lerobot_git_commit(),
+        is_self_contained=is_self_contained,
+        base_model_name_or_path=base_model_name_or_path,
+    )
+
+
+def _adapter_base_model_name(root: Path) -> str | None:
+    """Best-effort ``base_model_name_or_path`` from a PEFT ``adapter_config.json``.
+
+    Degrades to ``None`` on any read/parse problem, consistent with how ``validate_model_directory``
+    already degrades ``config.json`` parsing: a malformed adapter config must not crash inspection.
+    """
+    try:
+        with (root / PEFT_ADAPTER_CONFIG_NAME).open() as f:
+            adapter_config = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(adapter_config, dict):
+        return None
+    base_model = adapter_config.get("base_model_name_or_path")
+    return base_model if isinstance(base_model, str) else None
+
+
+def _read_info(root: Path) -> DatasetInfo:
+    try:
+        info = _lerobot.load_info(root)
+        _lerobot.check_version_compatibility(str(root), info.codebase_version, _lerobot.codebase_version())
+    except Exception as e:
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.INFO_PATH} could not be read as compatible dataset info: {e}"
+        ) from e
+    return info
+
+
+def _frame_features(root: Path, info: DatasetInfo) -> datasets.Features:
+    missing = sorted(set(_lerobot.DEFAULT_FEATURES) - set(info.features))
+    incompatible = [
+        key
+        for key, expected in _lerobot.DEFAULT_FEATURES.items()
+        if key in info.features
+        and (
+            info.features[key].get("dtype") != expected["dtype"]
+            or tuple(info.features[key].get("shape", ())) != expected["shape"]
+        )
+    ]
+    if missing or incompatible:
+        details = []
+        if missing:
+            details.append(f"missing {missing}")
+        if incompatible:
+            details.append(f"incompatible {sorted(incompatible)}")
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.INFO_PATH} has invalid required frame features: {', '.join(details)}."
+        )
+    try:
+        return _lerobot.get_hf_features_from_features(info.features)
+    except Exception as e:
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.INFO_PATH} contains an invalid frame schema: {e}"
+        ) from e
+
+
+def _read_stats(root: Path) -> None:
+    try:
+        if _lerobot.load_stats(root) is None:
+            raise FileNotFoundError(_lerobot.STATS_PATH)
+    except Exception as e:
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.STATS_PATH} could not be read as dataset stats: {e}"
+        ) from e
+
+
+def _read_tasks(root: Path, info: DatasetInfo) -> pd.DataFrame | None:
+    if info.total_frames > 0 and info.total_tasks == 0:
+        raise DatasetDirectoryError(f"{root} declares total_frames={info.total_frames} but total_tasks=0.")
+    if info.total_tasks == 0:
+        return None
+    try:
+        tasks = _lerobot.load_tasks(root)
+    except Exception as e:
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.DEFAULT_TASKS_PATH} could not be read as task metadata: {e}"
+        ) from e
+    if len(tasks) != info.total_tasks or not tasks.index.is_unique or "task_index" not in tasks:
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.DEFAULT_TASKS_PATH} does not describe exactly {info.total_tasks} unique tasks."
+        )
+    try:
+        indices = [int(value) for value in tasks["task_index"].tolist()]
+    except (TypeError, ValueError) as e:
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.DEFAULT_TASKS_PATH} has invalid task_index values: {e}"
+        ) from e
+    if indices != list(range(info.total_tasks)):
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.DEFAULT_TASKS_PATH} task_index values must be ordered from 0 to {info.total_tasks - 1}."
+        )
+    return tasks
+
+
+def _read_episodes(root: Path, info: DatasetInfo) -> datasets.Dataset | None:
+    if info.total_episodes == 0:
+        if info.total_frames > 0:
+            raise DatasetDirectoryError(
+                f"{root} declares total_frames={info.total_frames} but total_episodes=0."
+            )
+        return None
+    try:
+        episodes = _lerobot.load_episodes(root)
+    except Exception as e:
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.EPISODES_DIR} could not be read as episode metadata: {e}"
+        ) from e
+
+    required = {
+        "episode_index",
+        "length",
+        "dataset_from_index",
+        "dataset_to_index",
+        "data/chunk_index",
+        "data/file_index",
+    }
+    for key in _video_keys(info):
+        required |= {
+            f"videos/{key}/chunk_index",
+            f"videos/{key}/file_index",
+            f"videos/{key}/from_timestamp",
+            f"videos/{key}/to_timestamp",
+        }
+    missing = sorted(required - set(episodes.column_names))
+    if missing:
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.EPISODES_DIR} is missing required column(s): {', '.join(missing)}."
+        )
+    indices = _integer_values(episodes["episode_index"], f"{root}/{_lerobot.EPISODES_DIR} episode_index")
+    if len(episodes) != info.total_episodes or indices != list(range(info.total_episodes)):
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.EPISODES_DIR} must contain {info.total_episodes} rows ordered by episode_index."
+        )
+    return episodes
+
+
+def _validate_payloads(root: Path, info: DatasetInfo, episodes: datasets.Dataset | None) -> None:
+    if episodes is None:
+        return
+    video_keys = _video_keys(info)
+    if video_keys and info.video_path is None:
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.INFO_PATH} declares videos without a video_path template."
+        )
+
+    referenced_data: set[Path] = set()
+    referenced_videos: set[Path] = set()
+    for episode_index, row in enumerate(episodes):
+        length = _row_int(root, row, "length", episode_index)
+        if length <= 0:
+            raise DatasetDirectoryError(
+                f"{root}/{_lerobot.EPISODES_DIR} episode {episode_index} has length={length}."
+            )
+
+        data_path = _safe_path(
+            root,
+            info.data_path,
+            "data",
+            chunk_index=_row_int(root, row, "data/chunk_index", episode_index),
+            file_index=_row_int(root, row, "data/file_index", episode_index),
+        )
+        if (
+            len(data_path.parts) != 3
+            or data_path.parts[0] != _lerobot.DATA_DIR
+            or data_path.suffix != ".parquet"
+        ):
+            raise DatasetDirectoryError(
+                f"{root}/{_lerobot.INFO_PATH} data_path resolves outside the reader's {_lerobot.DATA_DIR}/*/*.parquet layout."
+            )
+        referenced_data.add(data_path)
+
+        for key in video_keys:
+            referenced_videos.add(
+                _safe_path(
+                    root,
+                    info.video_path,
+                    f"video {key!r}",
+                    video_key=key,
+                    chunk_index=_row_int(root, row, f"videos/{key}/chunk_index", episode_index),
+                    file_index=_row_int(root, row, f"videos/{key}/file_index", episode_index),
+                )
+            )
+            start = _row_float(root, row, f"videos/{key}/from_timestamp", episode_index)
+            end = _row_float(root, row, f"videos/{key}/to_timestamp", episode_index)
+            if start < 0 or end <= start or end - start + _TIMESTAMP_TOLERANCE_S < (length - 1) / info.fps:
+                raise DatasetDirectoryError(
+                    f"{root}/{_lerobot.EPISODES_DIR} episode {episode_index} has an invalid time range for {key!r}."
+                )
+
+    _require_files(root, referenced_data, "data")
+    _require_files(root, referenced_videos, "video")
+
+
+def _safe_path(root: Path, template: str | None, payload: str, **values: Any) -> Path:
+    if template is None:
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.INFO_PATH} cannot resolve the {payload} path: no template."
+        )
+    try:
+        path = Path(template.format(**values))
+    except (AttributeError, KeyError, TypeError, ValueError) as e:
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.INFO_PATH} cannot resolve the {payload} path: {e}"
+        ) from e
+    if path.is_absolute() or ".." in path.parts:
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.INFO_PATH} resolves {payload} outside the dataset root: {path}."
+        )
+    try:
+        (root / path).resolve(strict=False).relative_to(root.resolve())
+    except ValueError as e:
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.INFO_PATH} resolves {payload} outside the dataset root: {path}."
+        ) from e
+    return path
+
+
+def _require_files(root: Path, paths: set[Path], payload: str) -> None:
+    missing = sorted(path for path in paths if not (root / path).is_file())
+    if missing:
+        preview = ", ".join(str(path) for path in missing[:3])
+        suffix = f", and {len(missing) - 3} more" if len(missing) > 3 else ""
+        raise DatasetDirectoryError(
+            f"{root} is missing {len(missing)} {payload} file(s) referenced by episode metadata: "
+            f"{preview}{suffix}."
+        )
+
+
+def _read_frames(root: Path, info: DatasetInfo, features: datasets.Features) -> datasets.Dataset | None:
+    paths = sorted((root / _lerobot.DATA_DIR).glob("*/*.parquet"))
+    if not paths:
+        if info.total_frames == 0:
+            return None
+        raise DatasetDirectoryError(f"{root}/{_lerobot.DATA_DIR} has no loader-visible parquet files.")
+
+    # `datasets.Dataset.from_parquet(..., features=features)` (called below via
+    # `load_nested_dataset`) silently synthesizes a null-filled column for any name present in
+    # `features` but absent from the parquet file, instead of raising. That would make a dropped
+    # required column (e.g. `action`) invisible to the `column_names` check further down, so the
+    # on-disk schema is checked directly, before the loader gets a chance to paper over it.
+    expected_columns = set(features)
+    for path in paths:
+        try:
+            actual_columns = set(pq.ParquetFile(path).schema_arrow.names)
+        except Exception as e:
+            raise DatasetDirectoryError(f"{path} could not be read as parquet: {e}") from e
+        if actual_columns != expected_columns:
+            raise DatasetDirectoryError(
+                f"{path} does not match the frame schema declared in {_lerobot.INFO_PATH}: expected columns "
+                f"{sorted(expected_columns)}, found {sorted(actual_columns)}."
+            )
+
+    try:
+        frames = _lerobot.load_nested_dataset(root / _lerobot.DATA_DIR, features=features)
+    except Exception as e:
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.DATA_DIR} does not match the frame schema declared in {_lerobot.INFO_PATH}: {e}"
+        ) from e
+    if set(frames.column_names) != expected_columns or len(frames) != info.total_frames:
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.DATA_DIR} does not contain exactly {info.total_frames} rows with the declared columns."
+        )
+    return frames
+
+
+def _validate_frame_metadata(
+    root: Path,
+    info: DatasetInfo,
+    tasks: pd.DataFrame | None,
+    episodes: datasets.Dataset | None,
+    frames: datasets.Dataset | None,
+) -> None:
+    if frames is None:
+        if any((info.total_frames, info.total_episodes, info.total_tasks)):
+            raise DatasetDirectoryError(f"{root} has nonzero metadata for an empty dataset.")
+        return
+    if episodes is None or tasks is None:
+        raise DatasetDirectoryError(f"{root} has frame data without episode and task metadata.")
+
+    indices = _integer_values(frames["index"], f"{root}/{_lerobot.DATA_DIR} index")
+    episode_indices = _integer_values(frames["episode_index"], f"{root}/{_lerobot.DATA_DIR} episode_index")
+    frame_indices = _integer_values(frames["frame_index"], f"{root}/{_lerobot.DATA_DIR} frame_index")
+    task_indices = _integer_values(frames["task_index"], f"{root}/{_lerobot.DATA_DIR} task_index")
+    timestamps = _float_values(frames["timestamp"], f"{root}/{_lerobot.DATA_DIR} timestamp")
+    if indices != list(range(info.total_frames)):
+        raise DatasetDirectoryError(f"{root}/{_lerobot.DATA_DIR} index values are not globally contiguous.")
+    invalid_tasks = sorted({value for value in task_indices if not 0 <= value < info.total_tasks})
+    if invalid_tasks:
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.DATA_DIR} contains task_index values with no matching task row: {invalid_tasks}."
+        )
+
+    cursor = 0
+    for episode_index, row in enumerate(episodes):
+        length = _row_int(root, row, "length", episode_index)
+        start = _row_int(root, row, "dataset_from_index", episode_index)
+        end = _row_int(root, row, "dataset_to_index", episode_index)
+        if start != cursor or end != start + length or end > info.total_frames:
+            raise DatasetDirectoryError(
+                f"{root}/{_lerobot.EPISODES_DIR} episode {episode_index} has inconsistent frame range/length."
+            )
+        if episode_indices[start:end] != [episode_index] * length:
+            raise DatasetDirectoryError(
+                f"{root}/{_lerobot.DATA_DIR} rows [{start}, {end}) do not match episode {episode_index}."
+            )
+        if frame_indices[start:end] != list(range(length)):
+            raise DatasetDirectoryError(
+                f"{root}/{_lerobot.DATA_DIR} frame_index values for episode {episode_index} are not contiguous."
+            )
+        for frame_index, timestamp in enumerate(timestamps[start:end]):
+            if abs(timestamp - frame_index / info.fps) > _TIMESTAMP_TOLERANCE_S:
+                raise DatasetDirectoryError(
+                    f"{root}/{_lerobot.DATA_DIR} timestamp for episode {episode_index}, frame {frame_index} "
+                    f"is not synchronized to fps={info.fps}."
+                )
+        cursor = end
+    if cursor != info.total_frames:
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.EPISODES_DIR} frame ranges cover {cursor} rows, expected {info.total_frames}."
+        )
+
+
+def _video_keys(info: DatasetInfo) -> tuple[str, ...]:
+    return tuple(key for key, feature in info.features.items() if feature["dtype"] == "video")
+
+
+def _row_int(root: Path, row: dict, key: str, episode_index: int) -> int:
+    try:
+        return _strict_int(row[key])
+    except (KeyError, TypeError, ValueError) as e:
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.EPISODES_DIR} episode {episode_index} has invalid {key!r}: {e}"
+        ) from e
+
+
+def _row_float(root: Path, row: dict, key: str, episode_index: int) -> float:
+    try:
+        value = float(row[key])
+    except (KeyError, TypeError, ValueError) as e:
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.EPISODES_DIR} episode {episode_index} has invalid {key!r}: {e}"
+        ) from e
+    if not math.isfinite(value):
+        raise DatasetDirectoryError(
+            f"{root}/{_lerobot.EPISODES_DIR} episode {episode_index} has non-finite {key!r}."
+        )
+    return value
+
+
+def _strict_int(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, Integral):
+        raise TypeError(f"{value!r} is not an integer")
+    return int(value)
+
+
+def _integer_values(values: Any, label: str) -> list[int]:
+    try:
+        return [_strict_int(value) for value in values]
+    except (TypeError, ValueError) as e:
+        raise DatasetDirectoryError(f"{label} contains invalid integer values: {e}") from e
+
+
+def _float_values(values: Any, label: str) -> list[float]:
+    try:
+        result = [float(value) for value in values]
+    except (TypeError, ValueError) as e:
+        raise DatasetDirectoryError(f"{label} contains invalid numeric values: {e}") from e
+    if not all(math.isfinite(value) for value in result):
+        raise DatasetDirectoryError(f"{label} contains non-finite values.")
+    return result
