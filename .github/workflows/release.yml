@@ -6,19 +6,19 @@ on:
 
 # Publishing is intentionally owned by this standalone repository. The future
 # publish step uses OIDC and contains no API token; PyPI registration and
-# trusted-publisher binding remain a repository-owner prerequisite. The explicit
-# repository variable gate keeps the first release disabled for this migration.
+# trusted-publisher binding remain a repository-owner prerequisite. The
+# explicit repository variable gate keeps the first release disabled for this
+# migration.
 permissions:
   contents: read
-  id-token: write
+
+env:
+  UV_VERSION: "0.9.18"
 
 jobs:
-  publish:
-    name: build and install-test (publishing gated)
+  build:
+    name: build and install-test artifacts
     runs-on: ubuntu-24.04
-    environment:
-      name: pypi
-      url: https://pypi.org/p/lerobot-wandb
     steps:
       - uses: actions/checkout@v4.2.2
       - uses: actions/setup-python@v5.6.0
@@ -26,15 +26,84 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v6.3.1
         with:
-          version: "0.9.18"
+          version: ${{ env.UV_VERSION }}
       - run: uv venv --python 3.12 .venv
       - run: uv pip install --python .venv/bin/python build==1.3.0
+      - name: validate release tag
+        run: .venv/bin/python scripts/check_release_tag.py "$GITHUB_REF_NAME"
       - run: .venv/bin/python -m build --outdir dist
       - run: .venv/bin/python scripts/check_wheel.py dist/*.whl dist/*.tar.gz
-      - run: uv pip install --python .venv/bin/python dist/*.whl
-      - run: uv pip check --python .venv/bin/python
-      - run: .venv/bin/lerobot-wandb --help
+      - name: install-test wheel
+        run: |
+          uv venv --python 3.12 wheel-env
+          uv pip install --python wheel-env/bin/python dist/*.whl
+          uv pip check --python wheel-env/bin/python
+          wheel-env/bin/lerobot-wandb --help
+          wheel-env/bin/python -c 'import lerobot_wandb; print(lerobot_wandb.__version__)'
+      - name: install-test sdist
+        run: |
+          uv venv --python 3.12 sdist-env
+          uv pip install --python sdist-env/bin/python dist/*.tar.gz
+          uv pip check --python sdist-env/bin/python
+          sdist-env/bin/lerobot-wandb --help
+          sdist-env/bin/python -c 'import lerobot_wandb; print(lerobot_wandb.__version__)'
+      - uses: actions/upload-artifact@v4.6.2
+        with:
+          name: release-dist
+          path: dist/
+          if-no-files-found: error
+
+  compatibility:
+    name: fresh LeRobot extra compatibility
+    needs: [build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-python@v5.6.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4.3.0
+        with:
+          name: release-dist
+          path: dist
+      - name: install built wheel with [lerobot]
+        run: LEROBOT_VERSION=0.6.1 bash scripts/fresh_extra_smoke.sh dist/*.whl
+
+  coexistence:
+    name: coexistence and uninstall smoke
+    needs: [build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-python@v5.6.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4.3.0
+        with:
+          name: release-dist
+          path: dist
+      - name: install-test existing upstream and companion wheel
+        run: |
+          WHEEL="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
+          test -n "$WHEEL"
+          WHEEL_PATH="$PWD/$WHEEL" LEROBOT_VERSION=0.6.1 bash scripts/coexistence_smoke.sh
+
+  publish:
+    name: publish (gated)
+    needs: [build, compatibility, coexistence]
+    if: ${{ vars.ENABLE_PYPI_PUBLISH == 'true' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    environment:
+      name: pypi
+      url: https://pypi.org/p/lerobot-wandb
+    steps:
+      - uses: actions/download-artifact@v4.3.0
+        with:
+          name: release-dist
+          path: dist
       - uses: pypa/gh-action-pypi-publish@v1.12.4
-        if: ${{ vars.ENABLE_PYPI_PUBLISH == 'true' }}
         with:
           packages-dir: dist/

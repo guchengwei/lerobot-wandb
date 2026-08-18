@@ -70,6 +70,8 @@ jobs:
       - run: uv pip check --python .venv/bin/python
       - run: .venv/bin/lerobot-wandb --help
       - run: .venv/bin/python -c 'import lerobot_wandb; print(lerobot_wandb.__version__)'
+      - name: fresh built wheel [lerobot] install
+        run: LEROBOT_VERSION=0.6.1 PYTHON_BIN=.venv/bin/python bash scripts/fresh_extra_smoke.sh dist/*.whl
 
   upstream-compatibility:
     name: upstream LeRobot ${{ matrix.lerobot-version }}

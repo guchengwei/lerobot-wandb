@@ -16,18 +16,23 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 "$PYTHON_BIN" -c 'import sys; assert sys.version_info >= (3, 12), sys.version' \
   || { echo "coexistence smoke requires Python 3.12+ (set PYTHON_BIN)" >&2; exit 2; }
 
-echo "==> Creating isolated build environment"
-"$PYTHON_BIN" -m venv "$WORKDIR/build-env"
-BUILD_PYTHON="$WORKDIR/build-env/bin/python"
-"$BUILD_PYTHON" -m pip install --disable-pip-version-check -q build==1.3.0
+if [[ -n "${WHEEL_PATH:-}" ]]; then
+  WHEEL="$WHEEL_PATH"
+  test -f "$WHEEL"
+else
+  echo "==> Creating isolated build environment"
+  "$PYTHON_BIN" -m venv "$WORKDIR/build-env"
+  BUILD_PYTHON="$WORKDIR/build-env/bin/python"
+  "$BUILD_PYTHON" -m pip install --disable-pip-version-check -q build==1.3.0
 
-echo "==> Building the companion wheel and sdist"
-(
-  cd "$REPO_ROOT"
-  env -u PYTHONPATH "$BUILD_PYTHON" -m build --wheel --sdist --outdir "$WORKDIR/dist" >/dev/null
-)
-WHEEL="$(find "$WORKDIR/dist" -maxdepth 1 -name 'lerobot_wandb-*.whl' -print -quit)"
-test -n "$WHEEL"
+  echo "==> Building the companion wheel and sdist"
+  (
+    cd "$REPO_ROOT"
+    env -u PYTHONPATH "$BUILD_PYTHON" -m build --wheel --sdist --outdir "$WORKDIR/dist" >/dev/null
+  )
+  WHEEL="$(find "$WORKDIR/dist" -maxdepth 1 -name 'lerobot_wandb-*.whl' -print -quit)"
+  test -n "$WHEEL"
+fi
 
 echo "==> Installing upstream LeRobot ${LEROBOT_VERSION} first"
 "$PYTHON_BIN" -m venv "$WORKDIR/env"
