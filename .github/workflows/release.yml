@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+# Publishing is intentionally owned by this standalone repository. The future
+# publish step uses OIDC and contains no API token; PyPI registration and
+# trusted-publisher binding remain a repository-owner prerequisite. The explicit
+# repository variable gate keeps the first release disabled for this migration.
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: build and install-test (publishing gated)
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/p/lerobot-wandb
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-python@v5.6.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6.3.1
+        with:
+          version: "0.9.18"
+      - run: uv venv --python 3.12 .venv
+      - run: uv pip install --python .venv/bin/python build==1.3.0
+      - run: .venv/bin/python -m build --outdir dist
+      - run: .venv/bin/python scripts/check_wheel.py dist/*.whl dist/*.tar.gz
+      - run: uv pip install --python .venv/bin/python dist/*.whl
+      - run: uv pip check --python .venv/bin/python
+      - run: .venv/bin/lerobot-wandb --help
+      - uses: pypa/gh-action-pypi-publish@v1.12.4
+        if: ${{ vars.ENABLE_PYPI_PUBLISH == 'true' }}
+        with:
+          packages-dir: dist/

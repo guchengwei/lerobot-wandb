@@ -1,0 +1,105 @@
+# Copyright 2026 The HuggingFace Inc. team. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lerobot-wandb"
+version = "0.1.0"
+description = "Companion CLI for moving LeRobot datasets, models, and rollouts to/from W&B Artifacts"
+dynamic = ["readme"]
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+keywords = ["lerobot", "wandb", "robotics", "artifacts"]
+
+# The base distribution intentionally does NOT hard-depend on `lerobot`: it is a companion
+# package installed into an environment that may already contain LeRobot (upstream or a
+# compatible fork). Requiring a specific `lerobot` here would force the resolver to replace
+# or shadow the user's existing install. Instead the base package validates the installed
+# LeRobot at runtime (`lerobot_wandb.compatibility`) and fails with an actionable message
+# when LeRobot is absent or outside the supported range. Fresh installations can request the
+# optional `lerobot` extra to get a compatible LeRobot in one command.
+dependencies = [
+    "wandb>=0.24.1,<0.28.0",
+    "packaging>=24.2,<26.0",
+    "huggingface-hub>=1.0.0,<2.0.0",
+    "datasets>=4.7.0,<5.0.0",
+    "pandas>=2.0.0,<3.0.0",
+    "pyarrow>=21.0.0,<30.0.0",
+    # Runtime requirement of the dataset-inspection and H.264 preview paths, which import
+    # LeRobot's video utilities (`lerobot.datasets.video_utils` does `import av` at module
+    # top). LeRobot itself only pulls `av` via its `dataset` extra, so the companion must
+    # declare it to stay portable across supported LeRobot environments.
+    "av>=15.0.0,<16.0.0",
+]
+
+[project.optional-dependencies]
+# Supported LeRobot range for fresh installations. Plain `pip install lerobot-wandb` must
+# leave an already-installed LeRobot distribution untouched (see comment on dependencies).
+lerobot = ["lerobot>=0.6.1,<0.6.2"]
+test = ["pytest>=8.1.0,<9.0.0"]
+
+[project.urls]
+Homepage = "https://github.com/guchengwei/lerobot-wandb"
+Repository = "https://github.com/guchengwei/lerobot-wandb"
+Issues = "https://github.com/guchengwei/lerobot/issues/46"
+
+[project.scripts]
+lerobot-wandb = "lerobot_wandb.cli:main"
+
+[tool.setuptools.dynamic]
+readme = { file = ["README.md"] }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 110
+exclude = []
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", "I", "B", "C4", "T20", "N", "UP", "SIM"
+]
+ignore = [
+    "E501",
+    "T201",
+    "T203",
+    "B008",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401", "F403", "E402"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+known-first-party = ["lerobot_wandb"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = true
