@@ -110,9 +110,9 @@ lerobot-wandb model upload \
 
 The checkpoint path depends on the policy and training configuration. Confirm the path in the LeRobot training output before uploading it.
 
-## End-to-end SO-101 workflow
+## End-to-end workflow
 
-The following example covers the full path from demonstration recording to model promotion. Replace the ports, camera, task, episode counts, local paths, and policy settings with values for your setup. W&B object names come from the variables above.
+The Artifact workflow is not specific to SO-101. The robot-facing commands below use SO-101 only as a concrete LeRobot example; for another robot, replace the robot, teleoperator, camera, task, and local path arguments while keeping the companion steps the same.
 
 ### 1. Record demonstrations locally
 
