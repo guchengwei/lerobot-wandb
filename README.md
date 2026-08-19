@@ -153,7 +153,11 @@ Canonical video files stay inside the Artifact unchanged. Preview media is a sep
 - Raise the default 50-episode limit: `--preview-max-episodes NUMBER`
 - Disable previews: `--no-preview`
 
-The aggregate preview budget is the smaller of 250 MiB and 20% of the canonical dataset directory. Preview files are for inspection, not training.
+Preview preparation runs locally before `wandb.init()`, so no W&B Run exists while the files are being made. The CLI prints the batch size immediately, then shows each selected episode and camera as it starts and finishes (for example, `[1/4] episode 12 · observation.images.front`). During a transcode, it shows a percentage when duration is known; otherwise it reports activity or frame progress without inventing a percentage or ETA. After preparation, it prints the total and `Starting W&B upload...`.
+
+The budget formula is unchanged: `min(250 MiB, 20% of the canonical dataset directory bytes)`. After the selected previews are prepared, the CLI compares their measured size with that budget. Preview files are for inspection, not training. If the measured media exceeds the budget, an interactive terminal shows both values and asks for confirmation with `[y/N]` (default **No**). `yes` continues with the already-prepared files; `no`, EOF, or any other response stops before `wandb.init()`.
+
+In a non-interactive or CI environment, an over-budget upload fails before W&B unless you pass `--force-preview-budget`. Under budget, that flag has no effect; over budget, it approves only the measured preview-byte overage and does not bypass `--preview-max-episodes`, dataset/schema validation, episode-selection bounds, encoding failures, temporary-path safety checks, or W&B upload errors. To avoid an overage, reduce the preview selection (for example, choose fewer `--preview-episode` values instead of `--preview-all`) or use `--no-preview`.
 
 Current v3 datasets are supported. Canonical v2.1 datasets can be uploaded, downloaded, and materialized. For v2.1, support is limited to dataset transfer; `rollout upload` requires v3.
 
@@ -296,6 +300,7 @@ Keeping these boundaries explicit lets the companion run beside an ordinary upst
 
 - **LeRobot is missing or unsupported:** install upstream LeRobot `0.6.1`. Use `--allow-unsupported-lerobot` only after checking compatibility for your environment.
 - **Preview encoding is unavailable:** add `--no-preview` to dataset upload. Canonical Artifact files are unaffected.
+- **Preview media exceeds the budget:** the prompt defaults to No; answer `yes` to continue with the prepared files. In CI or another non-interactive environment, reduce the selection, use `--no-preview`, or rerun with `--force-preview-budget`; that flag permits only the measured byte overage and leaves the other safeguards in place.
 - **A downloaded alias changed:** use the resolved immutable `vN` reference printed by the command for training records, rollout lineage, and promotion.
 - **A model cannot be linked to Registry:** confirm that the directory contains a complete deployable policy rather than only an adapter.
 - **A command or option differs from this page:** use `lerobot-wandb --help`, the subcommand's `--help`, and `pyproject.toml` as the command reference for this release.

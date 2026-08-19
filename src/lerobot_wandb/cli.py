@@ -53,13 +53,21 @@ previews are separate run media; they are review derivatives, never canonical tr
 import argparse
 import contextlib
 import logging
+import math
+import sys
 import tempfile
 from pathlib import Path
 
 import wandb
 
 from .compatibility import LeRobotCompatibilityError, set_allow_unsupported
-from .dataset_preview import PreparedPreviewBatch, dataset_media_key, prepare_dataset_previews
+from .dataset_preview import (
+    PreparedPreviewBatch,
+    PreviewBudgetExceededError,
+    PreviewProgressEvent,
+    dataset_media_key,
+    prepare_dataset_previews,
+)
 from .dataset_transfer import (
     DEFAULT_PREVIEW_MAX_EPISODES,
     TransferDataset,
@@ -94,6 +102,179 @@ DATASET_ARTIFACT_TYPE = "dataset"
 # Kept as a local alias for the CLI's existing private seam; the Workspace contract itself lives
 # with the preview value object and is shared by any future publication surface.
 _dataset_media_key = dataset_media_key
+
+
+class _PreviewProgressRenderer:
+    """Render structured preview-preparation events without a terminal dependency.
+
+    The encoder deliberately knows nothing about terminals.  This renderer keeps redirected
+    output bounded by only reporting ten-percent changes when a total is known, and occasional
+    frame activity otherwise.  A TTY can afford in-place updates while each completed item still
+    gets its own line for a useful transcript.
+    """
+
+    _KNOWN_PROGRESS_STEP = 10.0
+    _UNKNOWN_FRAME_STEP = 100.0
+    _MAX_UNKNOWN_PROGRESS_LINES = 10
+
+    def __init__(self, stream: object | None = None) -> None:
+        self._stream = sys.stderr if stream is None else stream
+        isatty = getattr(self._stream, "isatty", None)
+        self._is_tty = bool(isatty()) if callable(isatty) else False
+        self._known_progress: dict[int, float] = {}
+        self._unknown_progress: dict[int, float] = {}
+        self._unknown_progress_lines: dict[int, int] = {}
+        self._active_index: int | None = None
+
+    def __call__(self, event: PreviewProgressEvent) -> None:
+        """Render one preview progress event emitted by the preparation layer."""
+
+        label = self._label(event)
+        phase = event.phase
+        if phase == "start":
+            self._known_progress.pop(event.index, None)
+            self._unknown_progress.pop(event.index, None)
+            self._unknown_progress_lines.pop(event.index, None)
+            self._emit(event.index, f"[{event.index}/{event.total}] {label} starting", complete=False)
+            return
+
+        if phase == "complete":
+            known = self._known_percent(event)
+            suffix = "100% done" if known is not None else "done"
+            if known is not None:
+                self._known_progress[event.index] = 100.0
+            self._emit(event.index, f"[{event.index}/{event.total}] {label} {suffix}", complete=True)
+            return
+
+        if phase != "progress":
+            return
+
+        known = self._known_percent(event)
+        if known is not None:
+            previous = self._known_progress.get(event.index)
+            if previous is not None and known < previous:
+                return
+            if previous is not None and known < min(100.0, previous + self._KNOWN_PROGRESS_STEP):
+                return
+            self._known_progress[event.index] = known
+            self._emit(event.index, f"[{event.index}/{event.total}] {label} {known:.0f}%", complete=False)
+            return
+
+        # With no usable total, report activity but never invent a percentage or ETA.  The first
+        # event is useful even for short videos; subsequent events are capped to one per 100
+        # frames (or one per item when the encoder supplies no frame count).
+        completed = event.completed
+        previous = self._unknown_progress.get(event.index)
+        if self._unknown_progress_lines.get(event.index, 0) >= self._MAX_UNKNOWN_PROGRESS_LINES:
+            return
+        if previous is not None and completed is not None and completed < previous:
+            return
+        if previous is not None and (completed is None or completed < previous + self._UNKNOWN_FRAME_STEP):
+            return
+        self._unknown_progress[event.index] = completed if completed is not None else 0.0
+        self._unknown_progress_lines[event.index] = self._unknown_progress_lines.get(event.index, 0) + 1
+        activity = self._activity(event)
+        self._emit(event.index, f"[{event.index}/{event.total}] {label} {activity}", complete=False)
+
+    @staticmethod
+    def _label(event: PreviewProgressEvent) -> str:
+        episode = f"episode {event.source.episode}" if event.source.episode is not None else "representative"
+        return f"{episode} · {event.source.video_key}"
+
+    @staticmethod
+    def _known_percent(event: PreviewProgressEvent) -> float | None:
+        if event.total_work is None or event.completed is None:
+            return None
+        try:
+            total_work = float(event.total_work)
+            completed = float(event.completed)
+        except (OverflowError, TypeError, ValueError):
+            return None
+        if not (math.isfinite(total_work) and math.isfinite(completed)) or total_work <= 0:
+            return None
+        return max(0.0, min(100.0, completed / total_work * 100.0))
+
+    @staticmethod
+    def _activity(event: PreviewProgressEvent) -> str:
+        if event.completed is None:
+            return "encoding…"
+        completed = event.completed
+        if isinstance(completed, float) and completed.is_integer():
+            completed = int(completed)
+        unit = event.unit or "frames"
+        return f"{completed} {unit}"
+
+    def _emit(self, index: int, line: str, *, complete: bool) -> None:
+        if self._is_tty:
+            if self._active_index != index and self._active_index is not None:
+                self._stream.write("\n")
+            self._stream.write(f"\r{line}")
+            if complete:
+                self._stream.write("\n")
+                self._active_index = None
+            else:
+                self._active_index = index
+        else:
+            self._stream.write(f"{line}\n")
+        flush = getattr(self._stream, "flush", None)
+        if callable(flush):
+            flush()
+
+
+def _is_tty(stream: object) -> bool:
+    """Return whether a stream is an interactive terminal without assuming a concrete type."""
+
+    isatty = getattr(stream, "isatty", None)
+    return bool(isatty()) if callable(isatty) else False
+
+
+def _format_preview_bytes(value: int) -> str:
+    if value >= 1024 * 1024:
+        return f"{value / (1024 * 1024):.1f} MiB ({value:,} bytes)"
+    if value >= 1024:
+        return f"{value / 1024:.1f} KiB ({value:,} bytes)"
+    return f"{value:,} bytes"
+
+
+def _preview_budget_error(preview_batch: PreparedPreviewBatch) -> PreviewBudgetExceededError:
+    """Build the safe default rejection with all actionable CLI alternatives."""
+
+    return PreviewBudgetExceededError(
+        measured_bytes=preview_batch.total_bytes,
+        budget_bytes=preview_batch.budget_bytes,
+        preview_count=len(preview_batch.previews),
+    )
+
+
+def _confirm_preview_budget(preview_batch: PreparedPreviewBatch) -> None:
+    """Apply the CLI's explicit policy to an already-prepared preview batch."""
+
+    print(
+        f"Prepared preview media: {_format_preview_bytes(preview_batch.total_bytes)}",
+        file=sys.stderr,
+        flush=True,
+    )
+    print(
+        f"Preview budget: {_format_preview_bytes(preview_batch.budget_bytes)}",
+        file=sys.stderr,
+        flush=True,
+    )
+    if not _is_tty(sys.stdin):
+        raise _preview_budget_error(preview_batch)
+
+    print(
+        "Preview media exceeds the safety budget. Upload anyway? [y/N]: ",
+        file=sys.stderr,
+        end="",
+        flush=True,
+    )
+    try:
+        response = sys.stdin.readline()
+    except (EOFError, OSError):
+        response = ""
+    if response.strip().lower() not in {"y", "yes"}:
+        print("Preview budget not approved; aborting before W&B initialization.", file=sys.stderr, flush=True)
+        raise _preview_budget_error(preview_batch)
 
 
 def _positive_int(value: str) -> int:
@@ -134,7 +315,29 @@ def cmd_dataset_upload(args: argparse.Namespace) -> None:
                     f"The dataset preview temp dir {tmp_dir} must be outside the dataset root {root}: "
                     "a preview inside the artifact root would be uploaded with it."
                 )
-            preview_batch = prepare_dataset_previews(root, sources, tmp_dir)
+            renderer = _PreviewProgressRenderer()
+            preview_word = "preview" if len(sources) == 1 else "previews"
+            print(
+                f"Preparing {len(sources)} dataset {preview_word}...",
+                file=sys.stderr,
+                flush=True,
+            )
+            preview_batch = prepare_dataset_previews(
+                root,
+                sources,
+                tmp_dir,
+                progress_callback=renderer,
+            )
+            prepared_word = "preview" if len(preview_batch.previews) == 1 else "previews"
+            print(
+                f"Prepared {len(preview_batch.previews)} {prepared_word}: "
+                f"{_format_preview_bytes(preview_batch.total_bytes)}",
+                file=sys.stderr,
+                flush=True,
+            )
+            if preview_batch.over_budget and not getattr(args, "force_preview_budget", False):
+                _confirm_preview_budget(preview_batch)
+            print("Starting W&B upload...", file=sys.stderr, flush=True)
 
         run = wandb.init(entity=args.entity, project=args.project, job_type="dataset_upload", mode="online")
         try:
@@ -501,6 +704,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Upload only the canonical Artifact and skip W&B run media. Useful when no H.264 "
         "encoder is available or review media is intentionally undesired.",
+    )
+    dataset_upload_parser.add_argument(
+        "--force-preview-budget",
+        action="store_true",
+        help="Allow prepared preview media to exceed its safety byte budget without prompting. "
+        "This does not bypass dataset validation, episode limits, or encoding safeguards.",
     )
     dataset_upload_parser.set_defaults(func=cmd_dataset_upload)
 
