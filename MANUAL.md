@@ -20,7 +20,26 @@ The diagram is conceptual. The commands and boundaries below describe the compan
 They have not been live-verified against a W&B workspace or robot in this documentation change;
 provide your own entity, project, hardware ports, camera settings, and success counts.
 
-## Shortest portable route
+## Overall LeRobot × W&B integration overview
+
+<details>
+<summary>Show the ecosystem overview (background only)</summary>
+
+![LeRobot × W&B integration overview (ecosystem context; not the companion contract)](./assets/wandb-workflow-overview-en.jpg)
+
+This image is an overall LeRobot × W&B integration overview from the upstream showcase. It is
+background context, not the complete `lerobot-wandb` capability contract. Labels or claims such as
+Auto-Upload/Streaming, training-run recording, deployment/closed-loop, and all-data/paid-plan may
+depend on upstream optional settings, historical fork hooks, or external deployment. `lerobot-wandb`
+does not guarantee those behaviors by itself.
+
+</details>
+
+The companion command flow below is the contract to use: W&B dataset Artifact →
+`lerobot-wandb dataset download/materialize` → local LeRobot dataset tree → upstream
+`lerobot-train --dataset.root=...` → local model → `lerobot-wandb model upload/promote`.
+
+## Shortest companion workflow
 
 The companion composition keeps the upstream training process in charge:
 
@@ -75,12 +94,27 @@ lifecycle. In particular:
 
 - Download a dataset to a local LeRobot tree before calling upstream `lerobot-train`.
 - Upload or promote the resulting local model in a separate companion command.
-- The training process does not materialize a W&B Artifact or publish a final model on the same
-  training run.
+- Upstream LeRobot remains in charge of `lerobot-record`, `lerobot-train`, `lerobot-rollout`, and
+  any optional W&B logging. The companion does not automatically take over those lifecycles or
+  publish a final model on the same training run.
 - The historical fork's train-time Artifact option and W&B-specific final-model fields are not
   part of this companion interface. Do not copy those fork-only options into an upstream
   `lerobot-train` command.
 - There is no import-time patching, wrapper replacement, or hidden dependency on a LeRobot fork.
+
+### Actual companion contract
+
+| Surface | Companion contract |
+| --- | --- |
+| W&B-backed remote lifecycle | Resolve requested refs, preserve immutable lineage, and record transfer metadata. |
+| materialized dataset/model | Validate and materialize local LeRobot dataset/model directories before or after transfer. |
+| Artifact transfer | Upload and download canonical dataset, model, and rollout Artifact bytes. |
+| dataset review preview | Publish bounded Run Media for inspection; preview media never replaces canonical dataset bytes. |
+| rollout Artifact | Upload a distinct rollout Artifact with the evaluated model as a lineage input. |
+| Registry collection / Promotion | Link an evaluated self-contained model to a Registry collection and promote an explicit immutable version. |
+
+These companion operations are explicit commands around upstream LeRobot. They are not an automatic
+training hook, streaming recorder, deployment controller, or same-run model-publication lifecycle.
 
 The companion runs alongside an existing upstream LeRobot without replacing it. Its distribution
 leaves LeRobot as a runtime companion rather than a hard resolver dependency, so commands that

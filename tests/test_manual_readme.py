@@ -31,10 +31,13 @@ STALE_FORK_MARKERS = (
 def test_manual_files_and_workflow_assets_exist():
     assert (REPO_ROOT / "MANUAL.md").is_file()
     assert (REPO_ROOT / "MANUAL.ja.md").is_file()
-    for asset in ("assets/wandb-workflow-overview-en.svg", "assets/wandb-workflow-overview-ja.svg"):
+    for asset in (
+        "assets/wandb-workflow-overview-en.jpg",
+        "assets/wandb-workflow-overview-ja.jpg",
+        "assets/wandb-workflow-overview-en.svg",
+        "assets/wandb-workflow-overview-ja.svg",
+    ):
         assert (REPO_ROOT / asset).is_file(), asset
-    assert not (REPO_ROOT / "assets/wandb-workflow-overview-en.jpg").exists()
-    assert not (REPO_ROOT / "assets/wandb-workflow-overview-ja.jpg").exists()
 
 
 def test_readme_navigates_to_both_manuals():
@@ -62,7 +65,7 @@ def test_public_docs_do_not_recommend_fork_only_paths_or_flags():
             assert marker not in text, f"{marker!r} remains in {path.name}"
 
 
-def test_manual_documents_the_portable_command_route():
+def test_manual_documents_the_companion_command_route():
     english = (REPO_ROOT / "MANUAL.md").read_text()
     required_markers = (
         "W&B companion integration",
@@ -93,6 +96,7 @@ def test_user_docs_frame_lerobot_wandb_as_a_companion_alongside_upstream_lerobot
     assert "lerobot-record" in japanese
     for text in (english, japanese):
         assert "standalone" not in text.lower()
+        assert "portable" not in text.lower()
 
 
 def test_readme_train_example_uses_the_upstream_dataset_root_and_checkpoint_layout():
@@ -137,20 +141,38 @@ def test_manual_model_validation_describes_structural_checks_only():
             assert marker not in text, f"{marker!r} remains in {path}"
 
 
-def test_workflow_assets_show_only_the_portable_boundary():
-    required_markers = (
-        "W&amp;B dataset Artifact",
-        "dataset download/materialize",
-        "local dataset tree",
-        "upstream lerobot-train --dataset.root",
-        "local trained model",
-        "model upload/promote",
-        "No automatic training lifecycle",
-    )
-    forbidden_markers = ("Auto-Upload", "W&amp;B SDK", "automatic training result", "all data saved")
-    for name in ("wandb-workflow-overview-en.svg", "wandb-workflow-overview-ja.svg"):
-        text = (REPO_ROOT / "assets" / name).read_text()
-        for marker in required_markers:
-            assert marker in text, f"{marker!r} missing from {name}"
-        for marker in forbidden_markers:
-            assert marker not in text, f"{marker!r} remains in {name}"
+def test_manual_overview_caption_and_contract_boundaries_are_explicit():
+    english = (REPO_ROOT / "MANUAL.md").read_text()
+    japanese = (REPO_ROOT / "MANUAL.ja.md").read_text()
+    for marker in (
+        "overall LeRobot × W&B integration overview",
+        "not the complete `lerobot-wandb` capability contract",
+        "Auto-Upload/Streaming",
+        "training-run recording",
+        "deployment/closed-loop",
+        "all-data/paid-plan",
+        "does not guarantee",
+        "W&B-backed remote lifecycle",
+        "materialized dataset/model",
+        "rollout Artifact",
+        "dataset review preview",
+        "Registry collection",
+        "Promotion",
+    ):
+        assert marker in english, marker
+    for marker in (
+        "LeRobot × W&B integration の全体像",
+        "`lerobot-wandb` の完全な capability contract ではありません",
+        "Auto-Upload/Streaming",
+        "training-run recording",
+        "deployment/closed-loop",
+        "all-data/paid-plan",
+        "単独では保証しません",
+        "W&B-backed remote lifecycle",
+        "materialized dataset/model",
+        "rollout Artifact",
+        "dataset review preview",
+        "Registry collection",
+        "Promotion",
+    ):
+        assert marker in japanese, marker

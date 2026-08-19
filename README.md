@@ -54,7 +54,7 @@ is `0.6.1`; LeRobot `0.6.2` has not been published yet. When a newer release
 exists, add it to the compatibility matrix and re-evaluate this specifier before
 declaring support.
 
-## Portable workflow
+## Companion workflow
 
 The supported companion composition is explicit and keeps the upstream training
 process in charge:
@@ -108,11 +108,16 @@ lerobot-wandb model promote \
 `--dataset.repo_id` if your materialized dataset uses another label; replace the
 example entity, project, Artifact names, and policy settings with your values.
 
-The companion owns dataset/model/rollout Artifact transfer, requested and
-resolved refs, sidecars, lineage, inspection/validation, model promotion and
-Registry links, and browser-playable review previews. Canonical dataset bytes are
-never replaced by preview derivatives. Current v3 and canonical v2.1 dataset
-transfer are supported; v2.1 is transfer-only for rollout publication.
+The companion contract covers a W&B-backed remote lifecycle around materialized
+dataset/model directories:
+
+- Artifact transfer, requested/resolved refs, sidecars, and lineage metadata;
+- dataset review preview media that never replaces canonical dataset bytes;
+- rollout Artifact publication with the evaluated model declared as lineage input;
+- Registry collection links and explicit Promotion of an evaluated model version.
+
+Current v3 and canonical v2.1 dataset transfer are supported; v2.1 is transfer-only
+for rollout publication.
 
 Dataset upload previews are bounded and deterministic. Without a selector, one
 representative episode is logged under `dataset_video/representative/<camera>`.
@@ -130,8 +135,10 @@ The following are deliberately not reproduced here:
 - W&B-specific final-model fields or publication on the same training run;
 - monkey-patching, import-time mutation, or replacement of upstream LeRobot CLIs.
 
-Those behaviors depend on lifecycle edits in the historical LeRobot fork. They
-remain legacy fork-only hooks and are not required for this companion workflow.
+Those behaviors depend on lifecycle edits in the historical LeRobot fork. Upstream
+LeRobot remains in charge of recording, training, rollout, and any optional W&B
+logging. This companion does not automatically take over those lifecycles or
+publish a final model on the same training run.
 
 ## Development
 
@@ -150,7 +157,7 @@ also verify that a wheel owns only `lerobot_wandb/*` and one
 
 ## Migration provenance
 
-This repository is a clean snapshot of the portable companion surface
+This repository is a clean snapshot of the companion Artifact-transfer surface
 from [guchengwei/lerobot](https://github.com/guchengwei/lerobot), source commit
 `ebdc227057056e077f90fa10155fd505fa53989d`, completed for
 [issue #46](https://github.com/guchengwei/lerobot/issues/46). The snapshot is

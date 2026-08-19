@@ -20,7 +20,26 @@ source-install command です。将来の first release 後には `pip install l
 変更では W&B workspace や実機に対する live 検証は行っていません。自分の entity、project、
 hardware port、camera 設定、success 数を指定してください。
 
-## 最短の portable route
+## LeRobot × W&B integration の全体像（ecosystem context）
+
+<details>
+<summary>ecosystem overview を表示（背景情報のみ）</summary>
+
+![LeRobot × W&B integration の全体像（ecosystem context; companion contract ではありません）](./assets/wandb-workflow-overview-ja.jpg)
+
+この image は upstream showcase 由来の、LeRobot × W&B integration の全体像です。背景情報であり、
+`lerobot-wandb` の完全な capability contract ではありません。Auto-Upload/Streaming、
+training-run recording、deployment/closed-loop、all-data/paid-plan などの表示・主張は、
+upstream の optional 設定、historical fork hooks、external deployment に依存する場合があります。
+これらを `lerobot-wandb` 単独では保証しません。
+
+</details>
+
+companion の command flow として保証されるのは次の経路です。W&B dataset Artifact →
+`lerobot-wandb dataset download/materialize` → local LeRobot dataset tree → upstream
+`lerobot-train --dataset.root=...` → local model → `lerobot-wandb model upload/promote`。
+
+## 最短の companion workflow
 
 companion の構成では upstream の training process をそのまま使います。
 
@@ -74,11 +93,27 @@ lifecycle ではありません。具体的には次のとおりです。
 
 - dataset を local LeRobot tree に download してから、upstream `lerobot-train` を実行します。
 - local model の upload と promote は、companion の別 command で行います。
-- training process が W&B Artifact を materialize したり、同じ training Run で final model を
-  publish したりすることはありません。
+- `lerobot-record`、`lerobot-train`、`lerobot-rollout` と upstream 側の optional な W&B logging は
+  upstream LeRobot が管理します。companion がこれらの lifecycle を自動的に引き取り、同じ training
+  Run で final model を publish することはありません。
 - historical fork の train-time Artifact option と W&B 固有の final-model fields は companion
   interface に含まれません。upstream `lerobot-train` に fork 専用 option を追加しないでください。
 - import-time patch、wrapper の置換、LeRobot fork への隠れた依存はありません。
+
+### Actual companion contract
+
+| Surface | Companion contract |
+| --- | --- |
+| W&B-backed remote lifecycle | requested ref を解決し、immutable lineage と transfer metadata を記録します。 |
+| materialized dataset/model | local LeRobot dataset/model directory を検証し、transfer の前後で materialize します。 |
+| Artifact transfer | canonical dataset、model、rollout の Artifact byte を upload / download します。 |
+| dataset review preview | inspection 用に bounded な Run Media を公開します。canonical dataset byte の代わりにはなりません。 |
+| rollout Artifact | 評価した model を lineage input として宣言した、別個の rollout Artifact を upload します。 |
+| Registry collection / Promotion | 評価済み self-contained model を Registry collection に link し、指定した immutable version を promote します。 |
+
+これらは upstream LeRobot の周囲で明示的に実行する companion command です。training hook、
+streaming recorder、deployment controller、同じ Run での model publication を自動化する lifecycle
+ではありません。
 
 companion は既存の upstream LeRobot と同じ environment で動き、LeRobot を runtime companion として
 利用します。base distribution は resolver が既存の LeRobot を置き換えないよう hard dependency に
@@ -296,7 +331,7 @@ lerobot-wandb rollout upload \
 
 success 数は operator が入力し、companion が physical task の success を判定することはありません。
 rollout publish は current v3 layout に対応しています。model は lineage のため input として宣言
-されますが、再度 download はしません。rollout は独立した `rollout` Artifact となり、canonical
+されますが、再度 download はしません。rollout は別個の `rollout` Artifact となり、canonical
 video byte は変更されません。video がある場合は browser playback 用の deterministic H.264/yuv420p
 derivative を Run Media に記録しますが、Artifact の一部ではなく training data でもありません。
 

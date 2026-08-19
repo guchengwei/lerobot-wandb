@@ -1,4 +1,4 @@
 include LICENSE README.md MANUAL.md MANUAL.ja.md MIGRATION.md
-recursive-include assets *.svg
+recursive-include assets *.jpg *.svg
 recursive-include scripts *.py *.sh
 recursive-include .github *.yml
