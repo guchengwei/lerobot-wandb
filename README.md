@@ -40,7 +40,7 @@ The handoff is always a local directory. W&B stores finished Artifacts; it is no
 
 ## Requirements
 
-- Python 3.10 or later
+- Python 3.12 or later
 - a W&B account and network access for Artifact operations
 - upstream LeRobot `>=0.6.1,<0.6.2` for commands that inspect LeRobot datasets or videos
 - the normal robot, camera, and video dependencies required by your LeRobot setup
@@ -49,30 +49,38 @@ The current package version is `0.1.0`. It has not been published to PyPI yet, s
 
 ## Install
 
-Install the companion beside an existing LeRobot environment:
+Install `lerobot-wandb` into the **same Python environment as LeRobot**. Activate the virtual environment you already use for `lerobot-record`, `lerobot-train`, and `lerobot-rollout`; do not create a second environment just for the companion. LeRobot-dependent commands import the LeRobot installation from that active environment.
+
+For example, if your LeRobot checkout uses `.venv`:
 
 ```bash
-pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot-wandb.git"
+source /path/to/lerobot/.venv/bin/activate
+python -m pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot-wandb.git"
 wandb login
 lerobot-wandb --help
 ```
 
-For a fresh environment, install the tested LeRobot extra as well:
+If you are starting from a fresh environment, create and activate one environment for both packages, then install the tested LeRobot extra into that same environment:
 
 ```bash
-pip install "lerobot-wandb[lerobot] @ git+https://github.com/guchengwei/lerobot-wandb.git"
+python -m pip install "lerobot-wandb[lerobot] @ git+https://github.com/guchengwei/lerobot-wandb.git"
 ```
 
 The base package does not declare LeRobot as a hard dependency. This avoids replacing an existing upstream installation during dependency resolution. At runtime, LeRobot-dependent commands check the installed version and explain how to proceed when it is missing or unsupported. `--allow-unsupported-lerobot` is available for experiments, but it is not a compatibility guarantee.
 
-Set defaults for the examples below:
+Set the W&B object names used by the examples once, then reuse them throughout the workflow:
 
 ```bash
 export WANDB_ENTITY="your-wandb-entity"
-export WANDB_PROJECT="so101-pick-cube"
+export WANDB_PROJECT="your-wandb-project"
+export DATASET_NAME="your-dataset"
+export POLICY_NAME="your-policy"
+export ROLLOUT_NAME="your-rollout"
 ```
 
-The examples use Linux and a Bash-compatible shell. On Windows, use the matching PowerShell activation command and replace `/dev/ttyACM*` with your `COM` ports.
+These are W&B names, not fixed names required by the companion. The local `pick-cube` paths below belong to the SO-101 example and can also be renamed for your project.
+
+The examples use Linux and a Bash-compatible shell. On Windows, activate the same LeRobot environment with the matching PowerShell command and replace `/dev/ttyACM*` with your `COM` ports.
 
 ## Quick start: train from a W&B dataset
 
@@ -80,7 +88,7 @@ This is the shortest path when a dataset already exists in W&B:
 
 ```bash
 lerobot-wandb dataset download \
-  --ref "$WANDB_ENTITY/$WANDB_PROJECT/pick-cube:raw" \
+  --ref "$WANDB_ENTITY/$WANDB_PROJECT/$DATASET_NAME:raw" \
   --root ./datasets/pick-cube
 
 lerobot-train \
@@ -96,7 +104,7 @@ lerobot-wandb model upload \
   --root ./outputs/train/act_pick_cube/checkpoints/last/pretrained_model \
   --entity "$WANDB_ENTITY" \
   --project "$WANDB_PROJECT" \
-  --name pick-cube-policy \
+  --name "$POLICY_NAME" \
   --alias candidate
 ```
 
@@ -104,7 +112,7 @@ The checkpoint path depends on the policy and training configuration. Confirm th
 
 ## End-to-end SO-101 workflow
 
-The following example covers the full path from demonstration recording to model promotion. Replace the ports, camera, task, episode counts, names, and policy settings with values for your setup.
+The following example covers the full path from demonstration recording to model promotion. Replace the ports, camera, task, episode counts, local paths, and policy settings with values for your setup. W&B object names come from the variables above.
 
 ### 1. Record demonstrations locally
 
@@ -131,14 +139,14 @@ lerobot-wandb dataset upload \
   --root ./data/pick-cube \
   --entity "$WANDB_ENTITY" \
   --project "$WANDB_PROJECT" \
-  --name pick-cube \
+  --name "$DATASET_NAME" \
   --alias raw
 ```
 
 The command validates the dataset before creating the W&B Run, then prints an immutable resolved reference such as:
 
 ```text
-your-wandb-entity/so101-pick-cube/pick-cube:v0
+your-wandb-entity/your-wandb-project/your-dataset:v0
 ```
 
 Save that `vN` reference when reproducibility matters. An alias such as `raw` can later point to another version.
@@ -165,7 +173,7 @@ Current v3 datasets are supported. Canonical v2.1 datasets can be uploaded, down
 
 ```bash
 lerobot-wandb dataset download \
-  --ref "$WANDB_ENTITY/$WANDB_PROJECT/pick-cube:raw" \
+  --ref "$WANDB_ENTITY/$WANDB_PROJECT/$DATASET_NAME:raw" \
   --root ./datasets/pick-cube
 ```
 
@@ -206,13 +214,13 @@ lerobot-wandb model upload \
   --root ./outputs/train/act_pick_cube/checkpoints/last/pretrained_model \
   --entity "$WANDB_ENTITY" \
   --project "$WANDB_PROJECT" \
-  --name pick-cube-policy \
+  --name "$POLICY_NAME" \
   --alias candidate
 ```
 
 The pre-upload check verifies the expected configuration and weight files. It does not load or execute the weights, so perform any policy-specific validation separately.
 
-Add `--registry-collection pick-cube-policy` if you also want to link a self-contained model to W&B Registry. A model that is not deployable can still be stored as an Artifact, but it cannot receive a deployable Registry link.
+Add `--registry-collection "$POLICY_NAME"` if you also want to link a self-contained model to W&B Registry. A model that is not deployable can still be stored as an Artifact, but it cannot receive a deployable Registry link.
 
 ### 6. Download the model and publish a rollout
 
@@ -220,14 +228,14 @@ Download the candidate on the robot machine:
 
 ```bash
 lerobot-wandb model download \
-  --ref "$WANDB_ENTITY/$WANDB_PROJECT/pick-cube-policy:candidate" \
+  --ref "$WANDB_ENTITY/$WANDB_PROJECT/$POLICY_NAME:candidate" \
   --root ./policies/pick-cube-candidate
 ```
 
-Copy the immutable reference printed by the command. Use it for rollout lineage instead of the movable `candidate` alias:
+Copy the immutable reference printed by the command. Use it for rollout lineage instead of the movable `candidate` alias. The exact `vN` value comes from the upload result, so do not assume `v0`:
 
 ```bash
-export MODEL_REF="your-wandb-entity/so101-pick-cube/pick-cube-policy:v0"
+export MODEL_REF="paste-the-resolved-vN-reference-here"
 ```
 
 Run the policy with upstream LeRobot:
@@ -254,7 +262,7 @@ lerobot-wandb rollout upload \
   --root ./data/rollout-pick-cube \
   --entity "$WANDB_ENTITY" \
   --project "$WANDB_PROJECT" \
-  --name pick-cube-rollout \
+  --name "$ROLLOUT_NAME" \
   --model-ref "$MODEL_REF" \
   --episodes-succeeded "$EPISODES_SUCCEEDED"
 ```
@@ -267,7 +275,7 @@ The operator supplies the success count; the companion does not score the physic
 lerobot-wandb model promote \
   --ref "$MODEL_REF" \
   --alias production \
-  --registry-collection pick-cube-policy
+  --registry-collection "$POLICY_NAME"
 ```
 
 Promotion moves aliases and optionally adds a Registry link; it does not upload model bytes. Promote the exact version used for evaluation. Re-uploading a downloaded directory would create a new model version without the rollout lineage edge.
@@ -276,10 +284,10 @@ Promotion moves aliases and optionally adds a Registry link; it does not upload 
 
 | Object | Location |
 | --- | --- |
-| Teaching data | `dataset` Artifact collection `pick-cube` |
+| Teaching data | `dataset` Artifact collection `$DATASET_NAME` |
 | Training input | materialized local directory `./datasets/pick-cube` |
-| Trained policy | local checkpoint, then `model` Artifact `pick-cube-policy` |
-| Evaluation episodes | local rollout tree, then `rollout` Artifact `pick-cube-rollout` |
+| Trained policy | local checkpoint, then `model` Artifact `$POLICY_NAME` |
+| Evaluation episodes | local rollout tree, then `rollout` Artifact `$ROLLOUT_NAME` |
 | Dataset-to-policy trace | selected dataset reference plus the local training configuration |
 | Policy-to-rollout trace | rollout Run input edge and rollout Artifact metadata |
 
@@ -298,7 +306,8 @@ Keeping these boundaries explicit lets the companion run beside an ordinary upst
 
 ## Troubleshooting
 
-- **LeRobot is missing or unsupported:** install upstream LeRobot `0.6.1`. Use `--allow-unsupported-lerobot` only after checking compatibility for your environment.
+- **LeRobot is missing or unsupported:** make sure you activated the same Python environment that contains LeRobot, then confirm upstream LeRobot `0.6.1` is installed there. Use `--allow-unsupported-lerobot` only after checking compatibility for your environment.
+- **`lerobot-wandb` and `lerobot-*` resolve from different environments:** reactivate the LeRobot virtual environment and install the companion there with `python -m pip`. Keeping both commands in one environment is required for LeRobot-dependent operations.
 - **Preview encoding is unavailable:** add `--no-preview` to dataset upload. Canonical Artifact files are unaffected.
 - **Preview media exceeds the budget:** the prompt defaults to No; answer `yes` to continue with the prepared files. In CI or another non-interactive environment, reduce the selection, use `--no-preview`, or rerun with `--force-preview-budget`; that flag permits only the measured byte overage and leaves the other safeguards in place.
 - **A downloaded alias changed:** use the resolved immutable `vN` reference printed by the command for training records, rollout lineage, and promotion.
