@@ -1,12 +1,13 @@
 # lerobot-wandb
 
-`lerobot-wandb` is a standalone companion integration for an ordinary upstream
-[LeRobot](https://github.com/huggingface/lerobot) installation. It moves datasets,
-models, and rollout datasets through W&B Artifacts without patching or replacing
-LeRobot.
+`lerobot-wandb` is a LeRobot W&B companion integration for an ordinary upstream
+[LeRobot](https://github.com/huggingface/lerobot) installation. It runs alongside
+an existing upstream LeRobot and moves datasets, models, and rollout datasets
+through W&B Artifacts without patching or replacing LeRobot.
 
-The standalone package version is 0.1.0. It is not published to PyPI yet; the
-repository checkout is the installable source for this migration PR.
+The package version is 0.1.0. It is not published to PyPI yet; the
+repository checkout is the current installable source while the first release is
+prepared.
 
 The names are intentionally stable:
 
@@ -17,6 +18,16 @@ The names are intentionally stable:
 This is a companion distribution, not a native LeRobot plugin. Upstream LeRobot
 does not currently expose a generic dataset-storage or training-lifecycle plugin
 contract for this integration.
+
+## Manual
+
+For the reader-facing, SO-101-oriented workflow, start with the [Manual](./MANUAL.md)
+or [Manual (日本語)](./MANUAL.ja.md). The shortest route is to materialize a W&B
+dataset into a local LeRobot tree, run ordinary upstream `lerobot-train` from that
+root, then upload and promote the resulting local model with this companion.
+
+The manual uses the Git source-install route because the first PyPI release is future
+work; `pip install lerobot-wandb` is not an available release path yet.
 
 ## Install
 
@@ -33,19 +44,19 @@ In a fresh environment, request the tested LeRobot compatibility extra as well:
 pip install "lerobot-wandb[lerobot] @ git+https://github.com/guchengwei/lerobot-wandb.git"
 ```
 
-The base package deliberately does not hard-depend on `lerobot`. It can therefore
-be installed alongside an existing upstream installation without making the
-resolver replace it. Commands that inspect LeRobot datasets or videos validate
-the installed distribution at runtime and report an actionable error when it is
-absent or outside this release's supported range (`>=0.6.1,<0.6.2`). The only
+The package deliberately leaves LeRobot as a runtime companion rather than a hard
+resolver dependency, so it can be installed alongside an existing upstream
+installation without making the resolver replace it. Commands that inspect
+LeRobot datasets or videos require a supported installed distribution and report
+an actionable error when it is absent or outside this release's supported range (`>=0.6.1,<0.6.2`). The only
 released LeRobot version currently covered by the blocking compatibility checks
 is `0.6.1`; LeRobot `0.6.2` has not been published yet. When a newer release
 exists, add it to the compatibility matrix and re-evaluate this specifier before
 declaring support.
 
-## Portable workflow
+## Companion workflow
 
-The supported standalone composition is explicit and keeps the upstream training
+The supported companion composition is explicit and keeps the upstream training
 process in charge:
 
 ```text
@@ -75,11 +86,16 @@ lerobot-wandb dataset download \
   --root ./datasets/pick-cube
 
 lerobot-train \
+  --dataset.repo_id=local/pick-cube \
   --dataset.root=./datasets/pick-cube \
-  --output_dir=./outputs/pick-cube
+  --policy.type=act \
+  --policy.device=cuda \
+  --output_dir=./outputs/train/act_pick_cube \
+  --steps=100000 \
+  --policy.push_to_hub=false
 
 lerobot-wandb model upload \
-  --root ./outputs/pick-cube/pretrained_model \
+  --root ./outputs/train/act_pick_cube/checkpoints/last/pretrained_model \
   --entity my-team --project so101-pick-cube \
   --name pick-cube-policy --alias candidate
 
@@ -88,11 +104,22 @@ lerobot-wandb model promote \
   --alias production --registry-collection pick-cube-policy
 ```
 
-The companion owns dataset/model/rollout Artifact transfer, requested and
-resolved refs, sidecars, lineage, inspection/validation, model promotion and
-Registry links, and browser-playable review previews. Canonical dataset bytes are
-never replaced by preview derivatives. Current v3 and canonical v2.1 dataset
-transfer are supported; v2.1 is transfer-only for rollout publication.
+`local/pick-cube` is the local LeRobot dataset label. Replace it consistently in
+`--dataset.repo_id` if your materialized dataset uses another label; replace the
+example entity, project, Artifact names, and policy settings with your values.
+
+The companion contract covers a W&B-backed remote lifecycle for local directories:
+
+- Validate local dataset/model directories before upload;
+- after an Artifact download completes, the downloaded contents are materialized
+  dataset/model files on local disk and can be read without a W&B network connection;
+- Artifact transfer, requested/resolved refs, sidecars, and lineage metadata;
+- dataset review preview media that never replaces canonical dataset bytes;
+- rollout Artifact publication with the evaluated model declared as lineage input;
+- Registry collection links and explicit Promotion of an evaluated model version.
+
+Current v3 and canonical v2.1 dataset transfer are supported; v2.1 is transfer-only
+for rollout publication.
 
 Dataset upload previews are bounded and deterministic. Without a selector, one
 representative episode is logged under `dataset_video/representative/<camera>`.
@@ -105,13 +132,15 @@ the smaller of 250 MiB and 20% of the canonical dataset directory. Use
 
 The following are deliberately not reproduced here:
 
-- `DatasetConfig.artifact_ref` in `lerobot-train`;
+- train-time W&B Artifact references in the fork's `lerobot-train`;
 - training-time dataset materialization inside the train command;
 - W&B-specific final-model fields or publication on the same training run;
 - monkey-patching, import-time mutation, or replacement of upstream LeRobot CLIs.
 
-Those behaviors depend on lifecycle edits in the historical LeRobot fork. They
-remain legacy fork-only hooks and are not required for this standalone workflow.
+Those behaviors depend on lifecycle edits in the historical LeRobot fork. Upstream
+LeRobot remains in charge of recording, training, rollout, and any optional W&B
+logging. This companion does not automatically take over those lifecycles or
+publish a final model on the same training run.
 
 ## Development
 
@@ -130,7 +159,7 @@ also verify that a wheel owns only `lerobot_wandb/*` and one
 
 ## Migration provenance
 
-This repository is a clean standalone snapshot of the portable companion surface
+This repository is a clean snapshot of the companion Artifact-transfer surface
 from [guchengwei/lerobot](https://github.com/guchengwei/lerobot), source commit
 `ebdc227057056e077f90fa10155fd505fa53989d`, completed for
 [issue #46](https://github.com/guchengwei/lerobot/issues/46). The snapshot is
