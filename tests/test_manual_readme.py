@@ -34,8 +34,6 @@ def test_manual_files_and_workflow_assets_exist():
     for asset in (
         "assets/wandb-workflow-overview-en.jpg",
         "assets/wandb-workflow-overview-ja.jpg",
-        "assets/wandb-workflow-overview-en.svg",
-        "assets/wandb-workflow-overview-ja.svg",
     ):
         assert (REPO_ROOT / asset).is_file(), asset
 
@@ -56,6 +54,12 @@ def test_manual_images_use_existing_relative_assets_and_alt_text():
             assert alt.strip(), path
             assert not target.startswith(("http://", "https://")), target
             assert (path.parent / target).is_file(), target
+
+
+def test_docs_and_manifest_do_not_reference_companion_svg_assets():
+    for path in (*DOCS, REPO_ROOT / "MANIFEST.in"):
+        text = path.read_text()
+        assert ".svg" not in text, f"SVG reference remains in {path.name}"
 
 
 def test_public_docs_do_not_recommend_fork_only_paths_or_flags():

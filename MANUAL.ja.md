@@ -1,7 +1,5 @@
 # LeRobot 用 W&B companion マニュアル（SO-101 の例）
 
-![W&B companion workflow の概要](./assets/wandb-workflow-overview-ja.svg)
-
 [English manual](./MANUAL.md) · [プロジェクト README](./README.md)
 
 このマニュアルは、通常の upstream LeRobot をすでに導入していて、LeRobot の dataset、model、
@@ -16,7 +14,7 @@ file を追加したりしません。
 source-install command です。将来の first release 後には `pip install lerobot-wandb` に短縮
 できますが、その command が今すぐ動くとは限りません。
 
-図は概念図です。以下の command と境界が companion interface の説明です。このドキュメント
+overview image は概念的なものです。以下の command と境界が companion interface の説明です。このドキュメント
 変更では W&B workspace や実機に対する live 検証は行っていません。自分の entity、project、
 hardware port、camera 設定、success 数を指定してください。
 
@@ -43,14 +41,10 @@ companion の command flow として保証されるのは次の経路です。W&
 
 companion の構成では upstream の training process をそのまま使います。
 
-```mermaid
-flowchart LR
-    A[W&B dataset Artifact] --> B[dataset download/materialize]
-    B --> C[local LeRobot dataset tree]
-    C --> D[upstream lerobot-train --dataset.root]
-    D --> E[local trained model]
-    E --> F[model upload/promote]
-```
+1. W&B dataset Artifact を download し、内容を local LeRobot tree に materialize します。
+2. その tree を `--dataset.root=...` に指定して upstream `lerobot-train` を実行します。
+3. local model を `lerobot-wandb model upload` で upload し、評価した immutable version を
+   `lerobot-wandb model promote` で promote します。
 
 最短の working route は次のとおりです。
 

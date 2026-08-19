@@ -1,7 +1,5 @@
 # W&B companion manual for LeRobot (SO-101 example)
 
-![W&B companion workflow overview](./assets/wandb-workflow-overview-en.svg)
-
 [Manual (日本語)](./MANUAL.ja.md) · [Project README](./README.md)
 
 This manual is for a user who already has ordinary upstream LeRobot installed and wants to move
@@ -16,7 +14,7 @@ There is no PyPI release yet. The source-install command below is the current ro
 future first release, the command can become `pip install lerobot-wandb`. Do not assume that
 future command works today.
 
-The diagram is conceptual. The commands and boundaries below describe the companion interface.
+The overview image is conceptual. The commands and boundaries below describe the companion interface.
 They have not been live-verified against a W&B workspace or robot in this documentation change;
 provide your own entity, project, hardware ports, camera settings, and success counts.
 
@@ -43,14 +41,10 @@ The companion command flow below is the contract to use: W&B dataset Artifact �
 
 The companion composition keeps the upstream training process in charge:
 
-```mermaid
-flowchart LR
-    A[W&B dataset Artifact] --> B[dataset download/materialize]
-    B --> C[local LeRobot dataset tree]
-    C --> D[upstream lerobot-train --dataset.root]
-    D --> E[local trained model]
-    E --> F[model upload/promote]
-```
+1. Download the W&B dataset Artifact and materialize its contents in a local LeRobot tree.
+2. Run upstream `lerobot-train --dataset.root=...` against that tree.
+3. Upload the local model with `lerobot-wandb model upload`, then promote the evaluated immutable
+   version with `lerobot-wandb model promote`.
 
 The shortest working route is:
 
