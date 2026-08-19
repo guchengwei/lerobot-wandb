@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""English/Japanese manual parity checks for executable examples and assets."""
+"""English/Japanese README parity checks for executable examples and assets."""
 
 import re
 from pathlib import Path
@@ -24,25 +24,26 @@ def _fenced_command_blocks(path: Path) -> list[str]:
     return [block.strip() for block in re.findall(r"```(?:bash|shell)\n(.*?)```", text, re.DOTALL)]
 
 
-def test_manuals_keep_the_same_executable_command_blocks():
-    english = _fenced_command_blocks(REPO_ROOT / "MANUAL.md")
-    japanese = _fenced_command_blocks(REPO_ROOT / "MANUAL.ja.md")
+def test_readmes_keep_the_same_executable_command_blocks():
+    english = _fenced_command_blocks(REPO_ROOT / "README.md")
+    japanese = _fenced_command_blocks(REPO_ROOT / "README.ja.md")
     assert english
     assert japanese == english
 
 
-def test_manuals_keep_language_specific_assets_and_cross_links():
-    english = (REPO_ROOT / "MANUAL.md").read_text()
-    japanese = (REPO_ROOT / "MANUAL.ja.md").read_text()
+def test_readmes_keep_language_specific_assets_and_cross_links():
+    english = (REPO_ROOT / "README.md").read_text()
+    japanese = (REPO_ROOT / "README.ja.md").read_text()
     assert "assets/wandb-workflow-overview-en.jpg" in english
     assert "assets/wandb-workflow-overview-ja.jpg" in japanese
-    assert "MANUAL.ja.md" in english
-    assert "MANUAL.md" in japanese
-    assert "日本語" in japanese
+    assert "README.ja.md" in english
+    assert "README.md" in japanese
+    assert "日本語" in english
+    assert "English" in japanese
 
 
 def test_japanese_training_boundary_matches_the_upstream_companion_scope():
-    japanese = " ".join((REPO_ROOT / "MANUAL.ja.md").read_text().split())
-    assert "upstream LeRobot の control 下" in japanese
-    assert "companion の W&B transfer command とは別" in japanese
-    assert "W&B から独立しています" not in japanese
+    japanese = " ".join((REPO_ROOT / "README.ja.md").read_text().split())
+    assert "通常の LeRobot 学習" in japanese
+    assert "companion はコマンドをラップせず" in japanese
+    assert "ロボットの制御ループには入りません" in japanese
