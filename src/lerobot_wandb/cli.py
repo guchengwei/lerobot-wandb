@@ -119,8 +119,7 @@ class _PreviewProgressRenderer:
 
     def __init__(self, stream: object | None = None) -> None:
         self._stream = sys.stderr if stream is None else stream
-        isatty = getattr(self._stream, "isatty", None)
-        self._is_tty = bool(isatty()) if callable(isatty) else False
+        self._is_tty = _is_tty(self._stream)
         self._known_progress: dict[int, float] = {}
         self._unknown_progress: dict[int, float] = {}
         self._unknown_progress_lines: dict[int, int] = {}

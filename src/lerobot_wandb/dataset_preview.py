@@ -502,22 +502,22 @@ def prepare_dataset_previews(
                 raise PreviewEncodingError(f"Preview source does not exist: {source_path}")
             destination = destination_dir / f"preview-{index:06d}.mp4"
             generated_paths.append(destination)
-            progress = _PreviewProgress(
+            progress_reporter = _PreviewProgress(
                 progress_callback,
                 index=index + 1,
                 total=total,
                 source=source,
             )
-            progress.start()
-            prepare_kwargs: dict[str, object] = {
-                "start_timestamp_s": source.start_timestamp_s,
-                "end_timestamp_s": source.end_timestamp_s,
-                "exact_source": source.is_exact_source_file,
-                "profile": profile,
-            }
-            if progress_callback is not None:
-                prepare_kwargs["_progress_reporter"] = progress
-            path = prepare_dataset_preview(source_path, destination, **prepare_kwargs)
+            progress_reporter.start()
+            path = prepare_dataset_preview(
+                source_path,
+                destination,
+                start_timestamp_s=source.start_timestamp_s,
+                end_timestamp_s=source.end_timestamp_s,
+                exact_source=source.is_exact_source_file,
+                profile=profile,
+                _progress_reporter=progress_reporter if progress_callback is not None else None,
+            )
             size = path.stat().st_size
             prepared.append(
                 PreparedDatasetPreview(
@@ -527,7 +527,7 @@ def prepare_dataset_previews(
                     used_source=path.resolve() == source_path,
                 )
             )
-            progress.complete()
+            progress_reporter.complete()
         total_bytes = sum(item.bytes for item in prepared)
         return PreparedPreviewBatch(
             previews=tuple(prepared),
