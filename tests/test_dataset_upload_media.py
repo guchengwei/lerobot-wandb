@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import argparse
+import io
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -22,7 +23,11 @@ import pytest
 pytest.importorskip("wandb", reason="wandb is required")
 
 from lerobot_wandb import cli
-from lerobot_wandb.dataset_preview import PreparedDatasetPreview, PreparedPreviewBatch
+from lerobot_wandb.dataset_preview import (
+    PreparedDatasetPreview,
+    PreparedPreviewBatch,
+    PreviewBudgetExceededError,
+)
 from lerobot_wandb.dataset_transfer import DatasetPreviewSource, TransferDataset
 from lerobot_wandb.inspect import DatasetDirectoryMetadata
 
@@ -61,7 +66,72 @@ def _args(root: Path) -> argparse.Namespace:
         preview_all=False,
         preview_max_episodes=50,
         no_preview=False,
+        force_preview_budget=False,
     )
+
+
+def _prepared_batch(
+    source: DatasetPreviewSource,
+    destination_dir: Path,
+    *,
+    total_bytes: int = 5,
+    budget_bytes: int = 10,
+) -> PreparedPreviewBatch:
+    destination = destination_dir / "preview-000000.mp4"
+    destination.write_bytes(b"preview")
+    preview = PreparedDatasetPreview(
+        source=source,
+        path=destination,
+        bytes=total_bytes,
+        used_source=False,
+    )
+    return PreparedPreviewBatch(
+        previews=(preview,),
+        total_bytes=total_bytes,
+        canonical_bytes=100,
+        budget_bytes=budget_bytes,
+    )
+
+
+class _FakeStdin(io.StringIO):
+    def __init__(self, response: str = "", *, tty: bool) -> None:
+        super().__init__(response)
+        self._tty = tty
+
+    def isatty(self) -> bool:
+        return self._tty
+
+
+def _patch_dataset_upload(
+    monkeypatch,
+    dataset: TransferDataset,
+    source: DatasetPreviewSource,
+    batch_factory,
+):
+    monkeypatch.setattr(cli, "inspect_transfer_dataset", lambda _root: dataset)
+    monkeypatch.setattr(
+        cli,
+        "select_dataset_preview_sources",
+        lambda _dataset, **_kwargs: [source],
+    )
+    prepare_calls = []
+
+    def _prepare(_root, sources, destination_dir, **kwargs):
+        prepare_calls.append((list(sources), kwargs))
+        return batch_factory(destination_dir)
+
+    monkeypatch.setattr(cli, "prepare_dataset_previews", _prepare)
+    run = MagicMock()
+    run.entity = "my-team"
+    run.project = "my-project"
+    monkeypatch.setattr(cli.wandb, "init", lambda **_kwargs: run)
+    monkeypatch.setattr(cli.wandb, "Video", lambda path, **_kwargs: f"video:{path}")
+    monkeypatch.setattr(
+        cli,
+        "upload_directory",
+        lambda *args, **kwargs: SimpleNamespace(resolved_ref="my-team/my-project/name:v0"),
+    )
+    return run, prepare_calls
 
 
 def test_dataset_preview_all_is_mutually_exclusive_with_explicit_episodes(capsys):
@@ -97,6 +167,39 @@ def test_dataset_preview_all_has_a_positive_configurable_default_limit():
     assert args.preview_max_episodes == 50
     with pytest.raises(SystemExit):
         parser.parse_args([*base, "--preview-all", "--preview-max-episodes", "0"])
+
+
+def test_force_preview_budget_is_dataset_upload_only():
+    parser = cli.build_parser()
+    args = parser.parse_args(
+        [
+            "dataset",
+            "upload",
+            "--root",
+            "dataset",
+            "--project",
+            "project",
+            "--name",
+            "name",
+            "--force-preview-budget",
+        ]
+    )
+
+    assert args.force_preview_budget is True
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            [
+                "model",
+                "upload",
+                "--root",
+                "model",
+                "--project",
+                "project",
+                "--name",
+                "name",
+                "--force-preview-budget",
+            ]
+        )
 
 
 def test_default_representative_media_key_is_schema_neutral():
@@ -135,10 +238,17 @@ def test_dataset_upload_logs_playable_preview_and_keeps_it_through_finish(tmp_pa
 
     state: dict[str, object] = {"prepared": False, "preview": None}
 
-    def _prepare_batch(passed_root: Path, passed_sources, destination_dir: Path) -> PreparedPreviewBatch:
+    def _prepare_batch(
+        passed_root: Path,
+        passed_sources,
+        destination_dir: Path,
+        *,
+        progress_callback,
+    ) -> PreparedPreviewBatch:
         assert passed_root == root.resolve()
         assert list(passed_sources) == [selected]
         assert destination_dir.is_dir()
+        assert callable(progress_callback)
         destination = destination_dir / "preview-000000.mp4"
         destination.write_bytes(b"h264-preview")
         state["prepared"] = True
@@ -239,7 +349,14 @@ def test_dataset_upload_media_keys_preserve_exact_camera_identity(tmp_path, monk
         lambda _dataset, **_kwargs: sources,
     )
 
-    def _prepare_batch(_root: Path, passed_sources, destination_dir: Path) -> PreparedPreviewBatch:
+    def _prepare_batch(
+        _root: Path,
+        passed_sources,
+        destination_dir: Path,
+        *,
+        progress_callback,
+    ) -> PreparedPreviewBatch:
+        assert callable(progress_callback)
         previews = []
         for index, source in enumerate(passed_sources):
             destination = destination_dir / f"preview-{index:06d}.mp4"
@@ -333,3 +450,232 @@ def test_dataset_no_preview_uploads_canonical_root_without_generating_media(tmp_
     prepare.assert_not_called()
     run.log.assert_not_called()
     run.finish.assert_called_once()
+
+
+def test_under_budget_preparation_proceeds_without_prompt(tmp_path, monkeypatch, capsys):
+    root = tmp_path / "dataset"
+    root.mkdir()
+    source_path = root / "episode.mp4"
+    source_path.write_bytes(b"source")
+    source = DatasetPreviewSource(10, "camera.front", source_path.relative_to(root))
+    dataset = _transfer_dataset(root)
+    run, prepare_calls = _patch_dataset_upload(
+        monkeypatch,
+        dataset,
+        source,
+        lambda destination: _prepared_batch(source, destination),
+    )
+    monkeypatch.setattr(cli.sys, "stdin", _FakeStdin("n\n", tty=True))
+
+    cli.cmd_dataset_upload(_args(root))
+
+    assert run.finish.call_count == 1
+    assert len(prepare_calls) == 1
+    assert callable(prepare_calls[0][1]["progress_callback"])
+    assert "Upload anyway?" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("response", ["y\n", "yes\n"])
+def test_over_budget_interactive_affirmative_uses_prepared_batch(
+    tmp_path,
+    monkeypatch,
+    response,
+    capsys,
+):
+    root = tmp_path / "dataset"
+    root.mkdir()
+    source_path = root / "episode.mp4"
+    source_path.write_bytes(b"source")
+    source = DatasetPreviewSource(10, "camera.front", source_path.relative_to(root))
+    dataset = _transfer_dataset(root)
+    prepared_path = {}
+
+    def _batch_factory(destination):
+        batch = _prepared_batch(
+            source,
+            destination,
+            total_bytes=15,
+            budget_bytes=10,
+        )
+        prepared_path["path"] = batch.previews[0].path
+        return batch
+
+    run, prepare_calls = _patch_dataset_upload(
+        monkeypatch,
+        dataset,
+        source,
+        _batch_factory,
+    )
+
+    def _finish():
+        assert prepared_path["path"].is_file()
+
+    run.finish.side_effect = _finish
+    monkeypatch.setattr(cli.sys, "stdin", _FakeStdin(response, tty=True))
+
+    cli.cmd_dataset_upload(_args(root))
+
+    assert run.finish.call_count == 1
+    assert len(prepare_calls) == 1
+    assert not prepared_path["path"].exists()
+    error = capsys.readouterr().err
+    assert error.index("Prepared 1 preview") < error.index("Starting W&B upload...")
+
+
+@pytest.mark.parametrize(
+    "response",
+    ["\n", "n\n", "", "maybe\n"],
+    ids=["default", "no", "eof", "invalid"],
+)
+def test_over_budget_interactive_nonaffirmative_rejects_before_init(tmp_path, monkeypatch, response):
+    root = tmp_path / "dataset"
+    root.mkdir()
+    source_path = root / "episode.mp4"
+    source_path.write_bytes(b"source")
+    source = DatasetPreviewSource(10, "camera.front", source_path.relative_to(root))
+    dataset = _transfer_dataset(root)
+    _patch_dataset_upload(
+        monkeypatch,
+        dataset,
+        source,
+        lambda destination: _prepared_batch(
+            source,
+            destination,
+            total_bytes=15,
+            budget_bytes=10,
+        ),
+    )
+    init = MagicMock()
+    monkeypatch.setattr(cli.wandb, "init", init)
+    monkeypatch.setattr(cli.sys, "stdin", _FakeStdin(response, tty=True))
+
+    with pytest.raises(PreviewBudgetExceededError):
+        cli.cmd_dataset_upload(_args(root))
+
+    init.assert_not_called()
+
+
+def test_over_budget_non_tty_rejects_with_actionable_message(tmp_path, monkeypatch):
+    root = tmp_path / "dataset"
+    root.mkdir()
+    source_path = root / "episode.mp4"
+    source_path.write_bytes(b"source")
+    source = DatasetPreviewSource(10, "camera.front", source_path.relative_to(root))
+    dataset = _transfer_dataset(root)
+    _patch_dataset_upload(
+        monkeypatch,
+        dataset,
+        source,
+        lambda destination: _prepared_batch(
+            source,
+            destination,
+            total_bytes=15,
+            budget_bytes=10,
+        ),
+    )
+    init = MagicMock()
+    monkeypatch.setattr(cli.wandb, "init", init)
+    monkeypatch.setattr(cli.sys, "stdin", _FakeStdin("y\n", tty=False))
+
+    with pytest.raises(PreviewBudgetExceededError) as error:
+        cli.cmd_dataset_upload(_args(root))
+
+    message = str(error.value)
+    assert "Select fewer episodes" in message
+    assert "--preview-episode" in message
+    assert "--no-preview" in message
+    assert "--force-preview-budget" in message
+    init.assert_not_called()
+
+
+def test_force_preview_budget_skips_prompt_without_reencoding(tmp_path, monkeypatch):
+    root = tmp_path / "dataset"
+    root.mkdir()
+    source_path = root / "episode.mp4"
+    source_path.write_bytes(b"source")
+    source = DatasetPreviewSource(10, "camera.front", source_path.relative_to(root))
+    dataset = _transfer_dataset(root)
+    run, prepare_calls = _patch_dataset_upload(
+        monkeypatch,
+        dataset,
+        source,
+        lambda destination: _prepared_batch(
+            source,
+            destination,
+            total_bytes=15,
+            budget_bytes=10,
+        ),
+    )
+    args = _args(root)
+    args.force_preview_budget = True
+    monkeypatch.setattr(cli.sys, "stdin", _FakeStdin("n\n", tty=True))
+
+    cli.cmd_dataset_upload(args)
+
+    assert run.finish.call_count == 1
+    assert len(prepare_calls) == 1
+
+
+def test_force_preview_budget_does_not_bypass_preview_episode_limit(tmp_path, monkeypatch):
+    root = tmp_path / "dataset"
+    root.mkdir()
+    dataset = _transfer_dataset(root)
+    monkeypatch.setattr(cli, "inspect_transfer_dataset", lambda _root: dataset)
+    selection = MagicMock(side_effect=ValueError("exceeds --preview-max-episodes"))
+    monkeypatch.setattr(cli, "select_dataset_preview_sources", selection)
+    prepare = MagicMock()
+    init = MagicMock()
+    monkeypatch.setattr(cli, "prepare_dataset_previews", prepare)
+    monkeypatch.setattr(cli.wandb, "init", init)
+    args = _args(root)
+    args.preview_all = True
+    args.force_preview_budget = True
+
+    with pytest.raises(ValueError, match="preview-max-episodes"):
+        cli.cmd_dataset_upload(args)
+
+    prepare.assert_not_called()
+    init.assert_not_called()
+
+
+def test_progress_renderer_identifies_sources_and_bounds_redirected_output():
+    source = DatasetPreviewSource(
+        episode=12,
+        video_key="observation.images.front",
+        relative_path=Path("video"),
+    )
+    stream = io.StringIO()
+    renderer = cli._PreviewProgressRenderer(stream)
+
+    def event(phase, completed=None, total_work=None, unit=None):
+        return SimpleNamespace(
+            index=1,
+            total=1,
+            source=source,
+            phase=phase,
+            completed=completed,
+            total_work=total_work,
+            unit=unit,
+        )
+
+    renderer(event("start"))
+    for completed in range(101):
+        renderer(event("progress", completed=completed, total_work=100, unit="frames"))
+    renderer(event("complete", completed=100, total_work=100, unit="frames"))
+
+    lines = stream.getvalue().splitlines()
+    assert len(lines) <= 15
+    assert all("episode 12" in line and "observation.images.front" in line for line in lines)
+    assert any("60%" in line or "70%" in line for line in lines)
+    assert any("100% done" in line for line in lines)
+
+    unknown_stream = io.StringIO()
+    unknown_renderer = cli._PreviewProgressRenderer(unknown_stream)
+    unknown_renderer(event("start"))
+    for completed in range(1001):
+        unknown_renderer(event("progress", completed=completed, unit="frames"))
+    unknown_renderer(event("complete", completed=1000, unit="frames"))
+    unknown_lines = unknown_stream.getvalue().splitlines()
+    assert len(unknown_lines) <= 15
+    assert any("frames" in line for line in unknown_lines)
+    assert not any("%" in line for line in unknown_lines)

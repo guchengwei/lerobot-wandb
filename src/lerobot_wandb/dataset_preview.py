@@ -32,7 +32,7 @@ from __future__ import annotations
 import math
 import os
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
@@ -79,6 +79,24 @@ class DatasetPreviewSource:
     @property
     def has_timestamp_range(self) -> bool:
         return self.start_timestamp_s is not None or self.end_timestamp_s is not None
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewProgressEvent:
+    """Structured progress for preparing one dataset preview.
+
+    ``index`` is one-based within the selected batch.  A known duration or timestamp range uses
+    seconds for ``completed`` and ``total_work``; when duration metadata is unavailable, the
+    encoder reports frame activity with an unknown total instead of inventing a percentage.
+    """
+
+    index: int
+    total: int
+    source: DatasetPreviewSource
+    phase: str
+    completed: int | float | None
+    total_work: int | float | None
+    unit: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +169,12 @@ class PreparedPreviewBatch:
     budget_bytes: int
 
     @property
+    def over_budget(self) -> bool:
+        """Whether the measured previews exceed the configured aggregate byte budget."""
+
+        return self.total_bytes > self.budget_bytes
+
+    @property
     def episode_indices(self) -> tuple[int, ...]:
         """Return the selected episode indexes in stable order.
 
@@ -178,7 +202,7 @@ class PreparedPreviewBatch:
 
 
 class PreviewBudgetExceededError(ValueError):
-    """The prepared Run Media exceeds the hard aggregate byte budget."""
+    """The caller rejected prepared Run Media that exceeds the aggregate byte budget."""
 
     def __init__(self, *, measured_bytes: int, budget_bytes: int, preview_count: int) -> None:
         self.measured_bytes = measured_bytes
@@ -188,14 +212,80 @@ class PreviewBudgetExceededError(ValueError):
         budget = _format_bytes(budget_bytes)
         super().__init__(
             f"Prepared dataset review media totals {measured} across {preview_count} item(s), "
-            f"exceeding the hard preview budget of {budget}. Select fewer episodes with "
-            "--preview-episode, omit --preview-all, or use --no-preview; the tool will not "
-            "silently lower preview quality or drop cameras."
+            f"exceeding the configured preview budget of {budget}. Select fewer episodes with "
+            "--preview-episode, omit --preview-all, use --no-preview, or rerun with "
+            "--force-preview-budget to approve the measured overage."
         )
 
 
 class PreviewEncodingError(RuntimeError):
     """A source could not be converted into the deterministic preview profile."""
+
+
+class _PreviewProgress:
+    """Adapt encoder work into bounded, monotonic structured progress events.
+
+    The encoder emits an event for each transcoded frame; output throttling belongs to the CLI
+    renderer rather than this library-level adapter.
+    """
+
+    __slots__ = ("callback", "completed", "index", "source", "total", "total_work", "unit")
+
+    def __init__(
+        self,
+        callback: Callable[[PreviewProgressEvent], None] | None,
+        *,
+        index: int,
+        total: int,
+        source: DatasetPreviewSource,
+    ) -> None:
+        self.callback = callback
+        self.index = index
+        self.total = total
+        self.source = source
+        self.completed: int | float | None = None
+        self.total_work: int | float | None = None
+        self.unit: str | None = None
+
+    def _emit(self, phase: str) -> None:
+        if self.callback is None:
+            return
+        self.callback(
+            PreviewProgressEvent(
+                index=self.index,
+                total=self.total,
+                source=self.source,
+                phase=phase,
+                completed=self.completed,
+                total_work=self.total_work,
+                unit=self.unit,
+            )
+        )
+
+    def start(self) -> None:
+        self._emit("start")
+
+    def configure(self, *, total_work: float | None, unit: str) -> None:
+        self.total_work = total_work
+        self.unit = unit
+        self.completed = 0 if unit == "frames" else 0.0
+
+    def progress(self, completed: int | float) -> None:
+        if self.unit == "seconds" and self.total_work is not None:
+            bounded = min(max(float(completed), 0.0), float(self.total_work))
+            previous = float(self.completed) if self.completed is not None else 0.0
+            self.completed = max(previous, bounded)
+        elif self.unit == "frames":
+            previous = int(self.completed) if self.completed is not None else 0
+            self.completed = max(previous, int(completed))
+        else:
+            self.completed = completed
+        self._emit("progress")
+
+    def complete(self) -> None:
+        if self.total_work is not None:
+            self.completed = self.total_work
+        self._emit("complete")
 
 
 def dataset_media_key(
@@ -287,6 +377,21 @@ def probe_video(path: Path | str) -> VideoProbe:
         raise PreviewEncodingError(f"Could not inspect preview source {source}: {error}") from error
 
 
+def _container_duration_s(
+    stream: av.video.stream.VideoStream, container: av.container.InputContainer
+) -> float | None:
+    """Return a finite positive duration from stream or container metadata, if available."""
+
+    duration_s: float | None = None
+    if stream.duration is not None and stream.time_base is not None:
+        duration_s = float(stream.duration * stream.time_base)
+    elif container.duration is not None:
+        duration_s = float(container.duration / av.time_base)
+    if duration_s is None or not math.isfinite(duration_s) or duration_s <= 0:
+        return None
+    return duration_s
+
+
 def is_browser_compatible(path: Path | str, *, profile: PreviewProfile = DEFAULT_PREVIEW_PROFILE) -> bool:
     """Return whether ``path`` matches observable source-side fast-path constraints.
 
@@ -307,13 +412,14 @@ def prepare_dataset_preview(
     end_timestamp_s: float | None = None,
     exact_source: bool | None = None,
     profile: PreviewProfile = DEFAULT_PREVIEW_PROFILE,
+    _progress_reporter: _PreviewProgress | None = None,
 ) -> Path:
     """Prepare one exact episode preview and return its media path.
 
     The source fast path is intentionally narrow: no timestamp range, a source proven to be one
     episode, and all observable browser-compatibility checks passing. CRF and GOP are not source
     predicates because they cannot be reliably recovered; they are applied only by the derivative
-    encoder, while ``prepare_dataset_previews`` enforces the aggregate byte budget. Callers that
+    encoder, while ``prepare_dataset_previews`` measures the aggregate byte budget. Callers that
     have no stronger proof should leave ``exact_source`` unset; the presence of a timestamp range
     already disables the fast path.
     """
@@ -355,6 +461,7 @@ def prepare_dataset_preview(
         start_timestamp_s=start_timestamp_s,
         end_timestamp_s=end_timestamp_s,
         profile=profile,
+        progress_reporter=_progress_reporter,
     )
 
 
@@ -364,6 +471,7 @@ def prepare_dataset_previews(
     destination_dir: Path | str,
     *,
     profile: PreviewProfile = DEFAULT_PREVIEW_PROFILE,
+    progress_callback: Callable[[PreviewProgressEvent], None] | None = None,
 ) -> PreparedPreviewBatch:
     """Prepare and measure one selected preview batch before ``wandb.init``."""
 
@@ -375,12 +483,14 @@ def prepare_dataset_previews(
         )
     destination_dir.mkdir(parents=True, exist_ok=True)
 
+    selected_sources = tuple(sources)
     canonical_bytes = canonical_directory_bytes(root)
     budget_bytes = preview_budget_bytes(canonical_bytes)
     prepared: list[PreparedDatasetPreview] = []
     generated_paths: list[Path] = []
     try:
-        for index, source in enumerate(sources):
+        total = len(selected_sources)
+        for index, source in enumerate(selected_sources):
             source_path = (root / source.relative_path).resolve()
             try:
                 source_path.relative_to(root)
@@ -392,6 +502,13 @@ def prepare_dataset_previews(
                 raise PreviewEncodingError(f"Preview source does not exist: {source_path}")
             destination = destination_dir / f"preview-{index:06d}.mp4"
             generated_paths.append(destination)
+            progress_reporter = _PreviewProgress(
+                progress_callback,
+                index=index + 1,
+                total=total,
+                source=source,
+            )
+            progress_reporter.start()
             path = prepare_dataset_preview(
                 source_path,
                 destination,
@@ -399,6 +516,7 @@ def prepare_dataset_previews(
                 end_timestamp_s=source.end_timestamp_s,
                 exact_source=source.is_exact_source_file,
                 profile=profile,
+                _progress_reporter=progress_reporter if progress_callback is not None else None,
             )
             size = path.stat().st_size
             prepared.append(
@@ -409,13 +527,8 @@ def prepare_dataset_previews(
                     used_source=path.resolve() == source_path,
                 )
             )
+            progress_reporter.complete()
         total_bytes = sum(item.bytes for item in prepared)
-        if total_bytes > budget_bytes:
-            raise PreviewBudgetExceededError(
-                measured_bytes=total_bytes,
-                budget_bytes=budget_bytes,
-                preview_count=len(prepared),
-            )
         return PreparedPreviewBatch(
             previews=tuple(prepared),
             total_bytes=total_bytes,
@@ -439,6 +552,7 @@ def _encode_preview(
     start_timestamp_s: float | None,
     end_timestamp_s: float | None,
     profile: PreviewProfile,
+    progress_reporter: _PreviewProgress | None = None,
 ) -> Path:
     """Decode, select, scale, and encode one source with PyAV."""
 
@@ -456,6 +570,17 @@ def _encode_preview(
             if not math.isfinite(input_fps) or input_fps <= 0:
                 input_fps = float(profile.max_fps)
             target_fps = min(input_fps, float(profile.max_fps))
+            duration_s = _container_duration_s(input_stream, input_container)
+            if progress_reporter is not None:
+                if start_timestamp_s is not None and end_timestamp_s is not None:
+                    progress_reporter.configure(
+                        total_work=end_timestamp_s - start_timestamp_s,
+                        unit="seconds",
+                    )
+                elif duration_s is not None:
+                    progress_reporter.configure(total_work=duration_s, unit="seconds")
+                else:
+                    progress_reporter.configure(total_work=None, unit="frames")
             target_rate = Fraction(target_fps).limit_denominator(1000)
             output_width, output_height = _preview_dimensions(
                 int(input_stream.width), int(input_stream.height), profile.max_width
@@ -512,6 +637,14 @@ def _encode_preview(
                     for packet in output_stream.encode(converted):
                         output_container.mux(packet)
                     frame_index += 1
+                    if progress_reporter is not None:
+                        progress_time = (
+                            frame_time - start_timestamp_s if start_timestamp_s is not None else frame_time
+                        )
+                        if progress_reporter.unit == "frames":
+                            progress_reporter.progress(frame_index)
+                        else:
+                            progress_reporter.progress(progress_time)
                     next_output_time += 1.0 / float(target_rate)
 
                 if frame_index == 0:
