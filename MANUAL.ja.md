@@ -5,22 +5,24 @@
 [English manual](./MANUAL.md) · [プロジェクト README](./README.md)
 
 このマニュアルは、通常の upstream LeRobot をすでに導入していて、LeRobot の dataset、model、
-rollout 結果を W&B Artifact で扱いたい利用者を対象にしています。`lerobot-wandb` は companion
-distribution であり、LeRobot の native plugin ではありません。独立した CLI として動作し、
-LeRobot を patch、置換したり、LeRobot の namespace に file を追加したりしません。
+rollout 結果を W&B Artifact で扱いたい利用者を対象にしています。`lerobot-wandb` は LeRobot 用の
+W&B companion integration で、既存の upstream LeRobot と同じ environment で動きます。upstream
+LeRobot はこの integration 用の generic plugin contract を現在公開していないため、native plugin
+ではなく companion CLI として動作します。LeRobot を patch、置換したり、LeRobot の namespace に
+file を追加したりしません。
 
 この例で使用する companion の version は `0.1.0`、対応する LeRobot の範囲は
 `>=0.6.1,<0.6.2` です。まだ PyPI release はありません。現在利用できる経路は以下の
 source-install command です。将来の first release 後には `pip install lerobot-wandb` に短縮
 できますが、その command が今すぐ動くとは限りません。
 
-図は概念図です。以下の command と境界が standalone interface の説明です。このドキュメント
+図は概念図です。以下の command と境界が companion interface の説明です。このドキュメント
 変更では W&B workspace や実機に対する live 検証は行っていません。自分の entity、project、
 hardware port、camera 設定、success 数を指定してください。
 
 ## 最短の portable route
 
-standalone の構成では upstream の training process をそのまま使います。
+companion の構成では upstream の training process をそのまま使います。
 
 ```mermaid
 flowchart LR
@@ -60,12 +62,12 @@ lerobot-wandb model promote \
   --alias production --registry-collection pick-cube-policy
 ```
 
-`my-team`、project、Artifact 名、policy 設定、resolved model version は自分の値へ置き換えて
+`my-team`、project、Artifact 名、local `repo_id` label（必要なら）、policy 設定、resolved model version は自分の値へ置き換えて
 ください。model path は `output_dir` の下に upstream LeRobot が作成した checkpoint です。
 選択した policy と training configuration の実際の場所を確認してください。`model promote` には、
 後から動く alias ではなく、評価に使用した immutable version を指定します。
 
-## Standalone の境界
+## Companion の境界
 
 この repository が担当するのは Artifact の transfer と inspection であり、upstream の training
 lifecycle ではありません。具体的には次のとおりです。
@@ -74,15 +76,16 @@ lifecycle ではありません。具体的には次のとおりです。
 - local model の upload と promote は、companion の別 command で行います。
 - training process が W&B Artifact を materialize したり、同じ training Run で final model を
   publish したりすることはありません。
-- historical fork の train-time Artifact option と W&B 固有の final-model fields は standalone
+- historical fork の train-time Artifact option と W&B 固有の final-model fields は companion
   interface に含まれません。upstream `lerobot-train` に fork 専用 option を追加しないでください。
 - import-time patch、wrapper の置換、LeRobot fork への隠れた依存はありません。
 
-companion は既存の upstream LeRobot と同じ environment に導入できます。base distribution は
-LeRobot を hard dependency にしていません。LeRobot dataset や video を inspection する command
-は、実行時に導入済み version を確認します。未導入または非対応の場合は actionable error を表示
-します。global な `--allow-unsupported-lerobot` は experimental な escape hatch であり、互換性を
-保証するものではありません。
+companion は既存の upstream LeRobot と同じ environment で動き、LeRobot を runtime companion として
+利用します。base distribution は resolver が既存の LeRobot を置き換えないよう hard dependency に
+していません。LeRobot dataset や video を inspection する command は、実行時に導入済み version を
+確認します。未導入または非対応の場合は actionable error を表示します。global な
+`--allow-unsupported-lerobot` は experimental な escape hatch であり、互換性を保証するものでは
+ありません。
 
 日本語 document はこの manual の翻訳 mirror です。別の product、command、compatibility range を
 追加するものではありません。

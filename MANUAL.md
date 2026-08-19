@@ -4,23 +4,25 @@
 
 [Manual (日本語)](./MANUAL.ja.md) · [Project README](./README.md)
 
-This manual is for a user who already has an ordinary upstream LeRobot installation and wants to
-move LeRobot datasets, models, and rollout results through W&B Artifacts. `lerobot-wandb` is a
-companion distribution, not a native LeRobot plugin. It is a separate CLI and does not patch,
-replace, or install files into LeRobot.
+This manual is for a user who already has ordinary upstream LeRobot installed and wants to move
+LeRobot datasets, models, and rollout results through W&B Artifacts. `lerobot-wandb` is a LeRobot
+W&B companion integration that runs alongside an existing upstream LeRobot. It provides a companion
+CLI; upstream LeRobot does not currently expose a generic plugin contract for this integration, so
+this companion is not presented as a native plugin. It does not patch, replace, or install files into
+LeRobot.
 
 The examples use version `0.1.0` of the companion and support the LeRobot range `>=0.6.1,<0.6.2`.
 There is no PyPI release yet. The source-install command below is the current route; after a
 future first release, the command can become `pip install lerobot-wandb`. Do not assume that
 future command works today.
 
-The diagram is conceptual. The commands and boundaries below describe the standalone interface.
+The diagram is conceptual. The commands and boundaries below describe the companion interface.
 They have not been live-verified against a W&B workspace or robot in this documentation change;
 provide your own entity, project, hardware ports, camera settings, and success counts.
 
 ## Shortest portable route
 
-The standalone composition keeps the upstream training process in charge:
+The companion composition keeps the upstream training process in charge:
 
 ```mermaid
 flowchart LR
@@ -60,12 +62,13 @@ lerobot-wandb model promote \
   --alias production --registry-collection pick-cube-policy
 ```
 
-Replace `my-team`, project and Artifact names, policy settings, and the resolved model version.
+Replace `my-team`, project and Artifact names, the local `repo_id` label if needed, policy settings,
+and the resolved model version.
 The model path is the upstream LeRobot checkpoint produced under `output_dir`; confirm its exact
 location for the policy and training configuration you selected. `model promote` should use the
 immutable version that was evaluated, not an alias that may move.
 
-## Standalone boundary
+## Companion boundary
 
 This repository deliberately owns Artifact transfer and inspection, not the upstream training
 lifecycle. In particular:
@@ -75,15 +78,15 @@ lifecycle. In particular:
 - The training process does not materialize a W&B Artifact or publish a final model on the same
   training run.
 - The historical fork's train-time Artifact option and W&B-specific final-model fields are not
-  part of this standalone interface. Do not copy those fork-only options into an upstream
+  part of this companion interface. Do not copy those fork-only options into an upstream
   `lerobot-train` command.
 - There is no import-time patching, wrapper replacement, or hidden dependency on a LeRobot fork.
 
-The companion can be installed beside an existing upstream LeRobot without replacing it. Its base
-distribution does not require LeRobot as a hard dependency; commands that inspect LeRobot datasets
-or videos check the installed version at runtime. A missing or unsupported installation produces an
-actionable error. The global `--allow-unsupported-lerobot` option is an experimental escape hatch,
-not a compatibility guarantee.
+The companion runs alongside an existing upstream LeRobot without replacing it. Its distribution
+leaves LeRobot as a runtime companion rather than a hard resolver dependency, so commands that
+inspect LeRobot datasets or videos can use the existing installation. They check its version at
+runtime and produce an actionable error when it is missing or unsupported. The global
+`--allow-unsupported-lerobot` option is an experimental escape hatch, not a compatibility guarantee.
 
 The Japanese document is a translated mirror of this manual. It does not provide a separate
 product, command, or compatibility range.
@@ -200,8 +203,9 @@ lerobot-train \
   --policy.push_to_hub=false
 ```
 
-This training command is intentionally independent of W&B. It reads the materialized LeRobot
-tree and saves a local checkpoint. With the shown `output_dir`, the final policy is normally under
+This training command stays under upstream LeRobot's control and is intentionally separate from
+the companion's W&B transfer commands. It reads the materialized LeRobot tree and saves a local
+checkpoint. With the shown `output_dir`, the final policy is normally under
 `./outputs/train/act_pick_cube/checkpoints/last/pretrained_model`; inspect the training log and
 checkpoint layout before uploading it. The companion does not infer or rewrite this path.
 
@@ -338,7 +342,7 @@ the immutable references needed to explain what was evaluated and promoted.
 - `lerobot-wandb --help`, each subcommand's `--help`, and the source `pyproject.toml` are the
   authoritative CLI surface for this release.
 - If runtime compatibility fails, install ordinary upstream LeRobot `0.6.1` or use the documented
-  experimental override only when you have independently checked compatibility.
+  experimental override only after checking compatibility yourself.
 - If preview encoding is unavailable, use `--no-preview` for dataset upload. Canonical Artifact
   files are unaffected by that choice.
 - Upload, download, and promotion need online W&B credentials. This manual does not claim that a

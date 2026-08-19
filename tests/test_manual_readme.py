@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Public documentation contract for the standalone companion manual."""
+"""Public documentation contract for the LeRobot companion manual."""
 
 import re
 from pathlib import Path
@@ -65,7 +65,9 @@ def test_public_docs_do_not_recommend_fork_only_paths_or_flags():
 def test_manual_documents_the_portable_command_route():
     english = (REPO_ROOT / "MANUAL.md").read_text()
     required_markers = (
-        "companion distribution, not a native LeRobot plugin",
+        "W&B companion integration",
+        "generic plugin contract for this integration",
+        "not presented as a native plugin",
         ">=0.6.1,<0.6.2",
         'pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot-wandb.git"',
         "lerobot-wandb dataset download",
@@ -77,6 +79,30 @@ def test_manual_documents_the_portable_command_route():
     )
     for marker in required_markers:
         assert marker in english, marker
+
+
+def test_user_docs_frame_lerobot_wandb_as_a_companion_alongside_upstream_lerobot():
+    english = (REPO_ROOT / "README.md").read_text() + (REPO_ROOT / "MANUAL.md").read_text()
+    japanese = (REPO_ROOT / "MANUAL.ja.md").read_text()
+    assert "LeRobot W&B companion integration" in english
+    assert "alongside an existing upstream LeRobot" in english
+    assert "generic plugin contract for this integration" in english
+    assert "upstream LeRobot と同じ environment" in japanese
+    assert "generic plugin contract" in japanese
+    assert "lerobot-record" in english
+    assert "lerobot-record" in japanese
+    for text in (english, japanese):
+        assert "standalone" not in text.lower()
+
+
+def test_readme_train_example_uses_the_upstream_dataset_root_and_checkpoint_layout():
+    readme = (REPO_ROOT / "README.md").read_text()
+    for marker in (
+        "--dataset.repo_id=local/pick-cube",
+        "--dataset.root=./datasets/pick-cube",
+        "--root ./outputs/train/act_pick_cube/checkpoints/last/pretrained_model",
+    ):
+        assert marker in readme, marker
 
 
 def test_manual_model_validation_describes_structural_checks_only():
