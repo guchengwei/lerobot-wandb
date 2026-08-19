@@ -11,13 +11,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Public documentation contract for the LeRobot companion manual."""
+"""Public documentation contract for the LeRobot companion READMEs."""
 
 import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parents[1]
-DOCS = (REPO_ROOT / "README.md", REPO_ROOT / "MANUAL.md", REPO_ROOT / "MANUAL.ja.md")
+PRIMARY_DOCS = (REPO_ROOT / "README.md", REPO_ROOT / "README.ja.md")
+LEGACY_DOCS = (REPO_ROOT / "MANUAL.md", REPO_ROOT / "MANUAL.ja.md")
+DOCS = (*PRIMARY_DOCS, *LEGACY_DOCS)
 STALE_FORK_MARKERS = (
     "packages/lerobot-wandb",
     "--dataset.artifact_ref",
@@ -28,9 +30,9 @@ STALE_FORK_MARKERS = (
 )
 
 
-def test_manual_files_and_workflow_assets_exist():
-    assert (REPO_ROOT / "MANUAL.md").is_file()
-    assert (REPO_ROOT / "MANUAL.ja.md").is_file()
+def test_readme_files_and_workflow_assets_exist():
+    for path in (*PRIMARY_DOCS, *LEGACY_DOCS):
+        assert path.is_file(), path
     for asset in (
         "assets/wandb-workflow-overview-en.jpg",
         "assets/wandb-workflow-overview-ja.jpg",
@@ -38,15 +40,21 @@ def test_manual_files_and_workflow_assets_exist():
         assert (REPO_ROOT / asset).is_file(), asset
 
 
-def test_readme_navigates_to_both_manuals():
-    readme = (REPO_ROOT / "README.md").read_text()
-    assert re.search(r"\[Manual\]\(\./MANUAL\.md\)", readme)
-    assert re.search(r"\[Manual \(日本語\)\]\(\./MANUAL\.ja\.md\)", readme)
-    assert "PyPI" in readme and "future" in readme.lower()
+def test_readmes_cross_link_and_legacy_manuals_redirect():
+    english = (REPO_ROOT / "README.md").read_text()
+    japanese = (REPO_ROOT / "README.ja.md").read_text()
+    manual = (REPO_ROOT / "MANUAL.md").read_text()
+    manual_ja = (REPO_ROOT / "MANUAL.ja.md").read_text()
+
+    assert re.search(r"\[日本語\]\(\./README\.ja\.md\)", english)
+    assert re.search(r"\[English\]\(\./README\.md\)", japanese)
+    assert re.search(r"\[README\]\(\./README\.md\)", manual)
+    assert re.search(r"\[README\]\(\./README\.ja\.md\)", manual_ja)
+    assert "PyPI" in english and "not been published" in english
 
 
-def test_manual_images_use_existing_relative_assets_and_alt_text():
-    for path in (REPO_ROOT / "MANUAL.md", REPO_ROOT / "MANUAL.ja.md"):
+def test_readme_images_use_existing_relative_assets_and_alt_text():
+    for path in PRIMARY_DOCS:
         text = path.read_text()
         links = re.findall(r"!\[([^]]+)\]\(([^)]+)\)", text)
         assert links, path
@@ -69,12 +77,11 @@ def test_public_docs_do_not_recommend_fork_only_paths_or_flags():
             assert marker not in text, f"{marker!r} remains in {path.name}"
 
 
-def test_manual_documents_the_companion_command_route():
-    english = (REPO_ROOT / "MANUAL.md").read_text()
+def test_english_readme_documents_the_companion_command_route():
+    english = (REPO_ROOT / "README.md").read_text()
     required_markers = (
-        "W&B companion integration",
-        "generic plugin contract for this integration",
-        "not presented as a native plugin",
+        "companion CLI for an existing LeRobot installation",
+        "not a native LeRobot plugin",
         ">=0.6.1,<0.6.2",
         'pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot-wandb.git"',
         "lerobot-wandb dataset download",
@@ -89,13 +96,12 @@ def test_manual_documents_the_companion_command_route():
 
 
 def test_user_docs_frame_lerobot_wandb_as_a_companion_alongside_upstream_lerobot():
-    english = (REPO_ROOT / "README.md").read_text() + (REPO_ROOT / "MANUAL.md").read_text()
-    japanese = (REPO_ROOT / "MANUAL.ja.md").read_text()
-    assert "LeRobot W&B companion integration" in english
-    assert "alongside an existing upstream LeRobot" in english
-    assert "generic plugin contract for this integration" in english
-    assert "upstream LeRobot と同じ environment" in japanese
-    assert "generic plugin contract" in japanese
+    english = (REPO_ROOT / "README.md").read_text()
+    japanese = (REPO_ROOT / "README.ja.md").read_text()
+    assert "companion CLI for an existing LeRobot installation" in english
+    assert "separate distribution, not a native LeRobot plugin" in english
+    assert "既存の LeRobot 環境に追加して使います" in japanese
+    assert "LeRobot のネイティブプラグインではありません" in japanese
     assert "lerobot-record" in english
     assert "lerobot-record" in japanese
     for text in (english, japanese):
@@ -113,101 +119,66 @@ def test_readme_train_example_uses_the_upstream_dataset_root_and_checkpoint_layo
         assert marker in readme, marker
 
 
-def test_manual_model_validation_describes_structural_checks_only():
-    english = " ".join((REPO_ROOT / "MANUAL.md").read_text().split())
-    japanese = " ".join((REPO_ROOT / "MANUAL.ja.md").read_text().split())
+def test_readmes_describe_structural_model_checks_only():
+    english = " ".join((REPO_ROOT / "README.md").read_text().split())
+    japanese = " ".join((REPO_ROOT / "README.ja.md").read_text().split())
     for marker in (
-        "structural validation",
         "expected configuration and weight files",
         "does not load or execute the weights",
-        "model-specific validation before rollout",
+        "policy-specific validation separately",
     ):
         assert marker in english, marker
     for marker in (
-        "構造検証",
-        "config file と weight file",
-        "weight を load/execute しません",
-        "rollout 前に model-specific validation",
+        "必要な設定ファイルと重みファイル",
+        "重みのロードや実行は行わない",
+        "ポリシー固有の検証は別途実施",
     ):
         assert marker in japanese, marker
-    for path, false_markers in (
-        (
-            "MANUAL.md",
-            ("loadable policy directory", "checks that the checkpoint can be loaded"),
-        ),
-        (
-            "MANUAL.ja.md",
-            ("load 可能な local policy directory", "checkpoint を load できることを確認"),
-        ),
+    for text, false_markers in (
+        (english, ("loadable policy directory", "checks that the checkpoint can be loaded")),
+        (japanese, ("load 可能な local policy directory", "checkpoint を load できることを確認")),
     ):
-        text = " ".join((REPO_ROOT / path).read_text().split())
         for marker in false_markers:
-            assert marker not in text, f"{marker!r} remains in {path}"
+            assert marker not in text, marker
 
 
-def test_materialized_term_requires_a_completed_artifact_download():
-    readme = " ".join((REPO_ROOT / "README.md").read_text().split())
-    english = " ".join((REPO_ROOT / "MANUAL.md").read_text().split())
-    japanese = " ".join((REPO_ROOT / "MANUAL.ja.md").read_text().split())
+def test_materialized_data_requires_a_completed_artifact_download():
+    english = " ".join((REPO_ROOT / "README.md").read_text().split())
+    japanese = " ".join((REPO_ROOT / "README.ja.md").read_text().split())
     for marker in (
-        "Validate local dataset/model directories before upload",
-        "after an Artifact download completes",
-        "materialized dataset/model files on local disk",
-    ):
-        assert marker in readme, marker
-    for marker in (
-        "Validate the local dataset directory before upload",
-        "Before upload, validate the local model directory",
-        "After the Artifact download completes",
-        "materialized dataset/model",
-        "read path does not need a W&B network connection",
+        "validate local directories before upload and after download",
+        "Once the download finishes",
+        "reads that local tree directly",
+        "does not need a W&B connection for training",
     ):
         assert marker in english, marker
     for marker in (
-        "upload 前に local dataset directory を検証",
-        "upload 前に local model directory を",
-        "Artifact の download が完了",
-        "materialized dataset/model",
-        "read path で W&B network に接続する必要はありません",
+        "アップロード前とダウンロード後にローカルディレクトリを検証",
+        "ダウンロードが終われば",
+        "ローカルディレクトリを直接読む",
+        "W&B への接続は不要",
     ):
         assert marker in japanese, marker
-    stale = "materialize local LeRobot dataset/model directories before or after transfer"
-    assert stale not in english
-    assert stale not in japanese
 
 
-def test_manual_overview_caption_and_contract_boundaries_are_explicit():
-    english = (REPO_ROOT / "MANUAL.md").read_text()
-    japanese = (REPO_ROOT / "MANUAL.ja.md").read_text()
+def test_overview_and_companion_boundaries_are_explicit():
+    english = (REPO_ROOT / "README.md").read_text()
+    japanese = (REPO_ROOT / "README.ja.md").read_text()
     for marker in (
-        "overall LeRobot × W&B integration overview",
-        "not the complete `lerobot-wandb` capability contract",
-        "Auto-Upload/Streaming",
-        "training-run recording",
-        "deployment/closed-loop",
-        "all-data/paid-plan",
-        "does not guarantee",
-        "W&B-backed remote lifecycle",
-        "materialized dataset/model",
-        "rollout Artifact",
-        "dataset review preview",
-        "Registry collection",
-        "Promotion",
+        "The diagram shows the full LeRobot and W&B workflow",
+        "handles the Artifact steps around recording, training, and rollout",
+        "the robot-facing commands remain standard LeRobot commands",
+        "What this companion does not do",
+        "does not reproduce those hooks",
+        "streaming recorder or deployment controller",
     ):
         assert marker in english, marker
     for marker in (
-        "LeRobot × W&B integration の全体像",
-        "`lerobot-wandb` の完全な capability contract ではありません",
-        "Auto-Upload/Streaming",
-        "training-run recording",
-        "deployment/closed-loop",
-        "all-data/paid-plan",
-        "単独では保証しません",
-        "W&B-backed remote lifecycle",
-        "materialized dataset/model",
-        "rollout Artifact",
-        "dataset review preview",
-        "Registry collection",
-        "Promotion",
+        "LeRobot と W&B を組み合わせた全体の流れ",
+        "記録・学習・ロールアウトの前後にある Artifact 操作",
+        "ロボットを動かすコマンドには通常の LeRobot",
+        "この companion が行わないこと",
+        "その hook を意図的に再実装していません",
+        "streaming recorder や deployment controller",
     ):
         assert marker in japanese, marker
