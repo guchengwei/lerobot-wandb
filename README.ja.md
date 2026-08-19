@@ -40,7 +40,7 @@
 
 ## 動作条件
 
-- Python 3.10 以降
+- Python 3.12 以降
 - W&B アカウントと、Artifact 操作時のネットワーク接続
 - LeRobot のデータセットや動画を扱うコマンドでは upstream LeRobot `>=0.6.1,<0.6.2`
 - 使用するロボット、カメラ、動画処理に必要な通常の LeRobot 依存関係
@@ -49,30 +49,38 @@
 
 ## インストール
 
-既存の LeRobot 環境に companion を追加します。
+`lerobot-wandb` は **LeRobot と同じ Python 環境**にインストールしてください。`lerobot-record`、`lerobot-train`、`lerobot-rollout` を実行するときに使っている virtual environment を先に有効化し、companion 用に別の環境を作らないでください。LeRobot に依存する companion コマンドは、その有効な環境に入っている LeRobot を import します。
+
+LeRobot の checkout が `.venv` を使っている場合の例:
 
 ```bash
-pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot-wandb.git"
+source /path/to/lerobot/.venv/bin/activate
+python -m pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot-wandb.git"
 wandb login
 lerobot-wandb --help
 ```
 
-LeRobot をまだ入れていない環境では、テスト済みの LeRobot extra も同時に指定できます。
+新しい環境から始める場合も、LeRobot と companion 用に 1 つの環境だけを作って有効化し、その同じ環境にテスト済みの LeRobot extra をインストールします。
 
 ```bash
-pip install "lerobot-wandb[lerobot] @ git+https://github.com/guchengwei/lerobot-wandb.git"
+python -m pip install "lerobot-wandb[lerobot] @ git+https://github.com/guchengwei/lerobot-wandb.git"
 ```
 
 基本パッケージでは LeRobot を hard dependency にしていません。依存関係の解決時に、既存の upstream LeRobot を別バージョンへ置き換えないためです。LeRobot を必要とするコマンドは、実行時にインストール済みバージョンを確認します。`--allow-unsupported-lerobot` は実験用の回避オプションであり、互換性を保証するものではありません。
 
-以下の例で使う既定値を設定します。
+以下の例で使う W&B 上の名前を先に設定し、その後の手順では同じ変数を使います。
 
 ```bash
 export WANDB_ENTITY="your-wandb-entity"
-export WANDB_PROJECT="so101-pick-cube"
+export WANDB_PROJECT="your-wandb-project"
+export DATASET_NAME="your-dataset"
+export POLICY_NAME="your-policy"
+export ROLLOUT_NAME="your-rollout"
 ```
 
-コマンド例は Linux と Bash 互換シェルを前提にしています。Windows では PowerShell 用の環境有効化コマンドを使い、`/dev/ttyACM*` を対応する `COM` ポートに置き換えてください。
+これらは W&B 上のオブジェクト名であり、companion が要求する固定名ではありません。以下に出てくるローカルの `pick-cube` パスは SO-101 の例なので、自分のプロジェクトに合わせて変更できます。
+
+コマンド例は Linux と Bash 互換シェルを前提にしています。Windows では同じ LeRobot 環境を PowerShell 用の activation コマンドで有効化し、`/dev/ttyACM*` を対応する `COM` ポートに置き換えてください。
 
 ## クイックスタート: W&B のデータセットから学習する
 
@@ -80,7 +88,7 @@ export WANDB_PROJECT="so101-pick-cube"
 
 ```bash
 lerobot-wandb dataset download \
-  --ref "$WANDB_ENTITY/$WANDB_PROJECT/pick-cube:raw" \
+  --ref "$WANDB_ENTITY/$WANDB_PROJECT/$DATASET_NAME:raw" \
   --root ./datasets/pick-cube
 
 lerobot-train \
@@ -96,7 +104,7 @@ lerobot-wandb model upload \
   --root ./outputs/train/act_pick_cube/checkpoints/last/pretrained_model \
   --entity "$WANDB_ENTITY" \
   --project "$WANDB_PROJECT" \
-  --name pick-cube-policy \
+  --name "$POLICY_NAME" \
   --alias candidate
 ```
 
@@ -104,7 +112,7 @@ checkpoint の場所は、ポリシーと学習設定によって変わります
 
 ## SO-101 の一連のワークフロー
 
-ここでは、教示データの記録からモデルの昇格までを順に説明します。ポート、カメラ、タスク、エピソード数、名前、ポリシー設定は自分の環境に合わせて変更してください。
+ここでは、教示データの記録からモデルの昇格までを順に説明します。ポート、カメラ、タスク、エピソード数、ローカルパス、ポリシー設定は自分の環境に合わせて変更してください。W&B 上の名前には、先ほど設定した変数を使います。
 
 ### 1. 教示データをローカルに記録する
 
@@ -131,14 +139,14 @@ lerobot-wandb dataset upload \
   --root ./data/pick-cube \
   --entity "$WANDB_ENTITY" \
   --project "$WANDB_PROJECT" \
-  --name pick-cube \
+  --name "$DATASET_NAME" \
   --alias raw
 ```
 
 コマンドは W&B Run を作成する前にデータセットを検証し、次のような変更されない参照先を表示します。
 
 ```text
-your-wandb-entity/so101-pick-cube/pick-cube:v0
+your-wandb-entity/your-wandb-project/your-dataset:v0
 ```
 
 再現性が必要なときは、この `vN` 形式の参照先を保存してください。`raw` のような alias は、後から別バージョンを指す場合があります。
@@ -165,7 +173,7 @@ your-wandb-entity/so101-pick-cube/pick-cube:v0
 
 ```bash
 lerobot-wandb dataset download \
-  --ref "$WANDB_ENTITY/$WANDB_PROJECT/pick-cube:raw" \
+  --ref "$WANDB_ENTITY/$WANDB_PROJECT/$DATASET_NAME:raw" \
   --root ./datasets/pick-cube
 ```
 
@@ -206,13 +214,13 @@ lerobot-wandb model upload \
   --root ./outputs/train/act_pick_cube/checkpoints/last/pretrained_model \
   --entity "$WANDB_ENTITY" \
   --project "$WANDB_PROJECT" \
-  --name pick-cube-policy \
+  --name "$POLICY_NAME" \
   --alias candidate
 ```
 
 アップロード前の検証では、必要な設定ファイルと重みファイルの有無を確認します。重みのロードや実行は行わないため、ポリシー固有の検証は別途実施してください。
 
-self-contained なモデルを W&B Registry にも登録する場合は、`--registry-collection pick-cube-policy` を追加します。デプロイできないモデルも Artifact として保存できますが、deployable Registry link は作成できません。
+self-contained なモデルを W&B Registry にも登録する場合は、`--registry-collection "$POLICY_NAME"` を追加します。デプロイできないモデルも Artifact として保存できますが、deployable Registry link は作成できません。
 
 ### 6. モデルをダウンロードし、ロールアウトを公開する
 
@@ -220,14 +228,14 @@ self-contained なモデルを W&B Registry にも登録する場合は、`--reg
 
 ```bash
 lerobot-wandb model download \
-  --ref "$WANDB_ENTITY/$WANDB_PROJECT/pick-cube-policy:candidate" \
+  --ref "$WANDB_ENTITY/$WANDB_PROJECT/$POLICY_NAME:candidate" \
   --root ./policies/pick-cube-candidate
 ```
 
-コマンドが表示する変更されない参照先をコピーします。ロールアウトの lineage には、移動する可能性がある `candidate` alias ではなく、この参照先を使います。
+コマンドが表示する変更されない参照先をコピーします。ロールアウトの lineage には、移動する可能性がある `candidate` alias ではなく、この参照先を使います。正確な `vN` はアップロード結果で決まるため、`v0` と決め打ちしないでください。
 
 ```bash
-export MODEL_REF="your-wandb-entity/so101-pick-cube/pick-cube-policy:v0"
+export MODEL_REF="paste-the-resolved-vN-reference-here"
 ```
 
 Upstream LeRobot でポリシーを実行します。
@@ -254,7 +262,7 @@ lerobot-wandb rollout upload \
   --root ./data/rollout-pick-cube \
   --entity "$WANDB_ENTITY" \
   --project "$WANDB_PROJECT" \
-  --name pick-cube-rollout \
+  --name "$ROLLOUT_NAME" \
   --model-ref "$MODEL_REF" \
   --episodes-succeeded "$EPISODES_SUCCEEDED"
 ```
@@ -267,7 +275,7 @@ lerobot-wandb rollout upload \
 lerobot-wandb model promote \
   --ref "$MODEL_REF" \
   --alias production \
-  --registry-collection pick-cube-policy
+  --registry-collection "$POLICY_NAME"
 ```
 
 昇格では alias を移動し、必要に応じて Registry link を追加します。モデル本体の再アップロードは行いません。評価に使った正確なバージョンを指定してください。ダウンロード済みディレクトリを再アップロードすると、ロールアウトとの lineage edge を持たない新しいモデルバージョンが作られます。
@@ -276,10 +284,10 @@ lerobot-wandb model promote \
 
 | 対象 | 保存先 |
 | --- | --- |
-| 教示データ | `dataset` Artifact collection `pick-cube` |
+| 教示データ | `dataset` Artifact collection `$DATASET_NAME` |
 | 学習入力 | ローカルに配置した `./datasets/pick-cube` |
-| 学習済みポリシー | ローカル checkpoint、続いて `model` Artifact `pick-cube-policy` |
-| 評価エピソード | ローカルの rollout tree、続いて `rollout` Artifact `pick-cube-rollout` |
+| 学習済みポリシー | ローカル checkpoint、続いて `model` Artifact `$POLICY_NAME` |
+| 評価エピソード | ローカルの rollout tree、続いて `rollout` Artifact `$ROLLOUT_NAME` |
 | データセットからポリシーまでの記録 | 使用したデータセット参照先とローカル学習設定 |
 | ポリシーからロールアウトまでの記録 | rollout Run の input edge と rollout Artifact metadata |
 
@@ -298,7 +306,8 @@ lerobot-wandb model promote \
 
 ## トラブルシューティング
 
-- **LeRobot がない、またはバージョンが非対応:** upstream LeRobot `0.6.1` をインストールしてください。`--allow-unsupported-lerobot` は、自分の環境で互換性を確認した場合だけ使用します。
+- **LeRobot がない、またはバージョンが非対応:** LeRobot が入っている同じ Python 環境を有効化しているか確認し、その環境に upstream LeRobot `0.6.1` が入っていることを確認してください。`--allow-unsupported-lerobot` は、自分の環境で互換性を確認した場合だけ使用します。
+- **`lerobot-wandb` と `lerobot-*` が別の環境から実行される:** LeRobot の virtual environment を有効化し直し、その環境で `python -m pip` を使って companion をインストールしてください。LeRobot に依存する操作では、両方のコマンドを同じ環境に置く必要があります。
 - **プレビューをエンコードできない:** dataset upload に `--no-preview` を追加してください。元の Artifact ファイルには影響しません。
 - **プレビュー容量が上限を超える:** 確認の既定値は No です。`yes` と答えると準備済みファイルを使って続行します。CI など非対話環境では、選択範囲を小さくするか `--no-preview` を使うか、`--force-preview-budget` を付けて再実行してください。このフラグが許可するのは実測した容量超過だけで、他の安全策はそのまま働きます。
 - **ダウンロードに使った alias の参照先が変わった:** 学習記録、ロールアウトの lineage、昇格には、コマンドが表示した `vN` 形式の参照先を使ってください。
