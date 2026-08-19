@@ -1,6 +1,6 @@
 # LeRobot 用 W&B companion マニュアル（SO-101 の例）
 
-![W&B companion workflow の概要](./assets/wandb-workflow-overview-ja.jpg)
+![W&B companion workflow の概要](./assets/wandb-workflow-overview-ja.svg)
 
 [English manual](./MANUAL.md) · [プロジェクト README](./README.md)
 
@@ -218,7 +218,9 @@ checkpoint を publish してください。
 
 ## 5. Trained model を upload / fetch する
 
-load 可能な local policy directory を versioned model Artifact として upload します。
+local policy directory を versioned model Artifact として upload します。upload 前の構造検証は
+expected config file と weight file の存在を確認しますが、weight を load/execute しません。
+rollout 前に model-specific validation を実施してください。
 
 ```bash
 lerobot-wandb model upload \
@@ -229,7 +231,8 @@ lerobot-wandb model upload \
   --alias candidate
 ```
 
-companion は upload Run を作る前に model manifest を検証します。任意で
+companion は upload Run を作る前に model manifest を検証します。これは構造検証だけであり、expected
+config file と weight file を確認しますが、weight を load/execute しません。任意で
 `--registry-collection pick-cube-policy` を付けると、self-contained model を unified W&B Registry
 へ link できます。adapter-only、または deploy できない directory は upload できますが、deployable
 Registry link は拒否されます。
@@ -250,7 +253,8 @@ export MODEL_REF="your-wandb-entity/so101-pick-cube/pick-cube-policy:v0"
 ```
 
 生成された directory は local の upstream policy path です。download は transactional に行われ、
-checkpoint を load できることを確認してから指定先へ移動します。
+expected config file と weight file の存在を再度構造検証しますが、weight を load/execute しません。
+rollout 前に model-specific validation を実施してください。
 
 ## 6. Robot で rollout し結果を publish する
 

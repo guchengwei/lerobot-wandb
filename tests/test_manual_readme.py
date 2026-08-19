@@ -31,8 +31,10 @@ STALE_FORK_MARKERS = (
 def test_manual_files_and_workflow_assets_exist():
     assert (REPO_ROOT / "MANUAL.md").is_file()
     assert (REPO_ROOT / "MANUAL.ja.md").is_file()
-    for image in ("assets/wandb-workflow-overview-en.jpg", "assets/wandb-workflow-overview-ja.jpg"):
-        assert (REPO_ROOT / image).is_file(), image
+    for asset in ("assets/wandb-workflow-overview-en.svg", "assets/wandb-workflow-overview-ja.svg"):
+        assert (REPO_ROOT / asset).is_file(), asset
+    assert not (REPO_ROOT / "assets/wandb-workflow-overview-en.jpg").exists()
+    assert not (REPO_ROOT / "assets/wandb-workflow-overview-ja.jpg").exists()
 
 
 def test_readme_navigates_to_both_manuals():
@@ -75,3 +77,54 @@ def test_manual_documents_the_portable_command_route():
     )
     for marker in required_markers:
         assert marker in english, marker
+
+
+def test_manual_model_validation_describes_structural_checks_only():
+    english = " ".join((REPO_ROOT / "MANUAL.md").read_text().split())
+    japanese = " ".join((REPO_ROOT / "MANUAL.ja.md").read_text().split())
+    for marker in (
+        "structural validation",
+        "expected configuration and weight files",
+        "does not load or execute the weights",
+        "model-specific validation before rollout",
+    ):
+        assert marker in english, marker
+    for marker in (
+        "構造検証",
+        "config file と weight file",
+        "weight を load/execute しません",
+        "rollout 前に model-specific validation",
+    ):
+        assert marker in japanese, marker
+    for path, false_markers in (
+        (
+            "MANUAL.md",
+            ("loadable policy directory", "checks that the checkpoint can be loaded"),
+        ),
+        (
+            "MANUAL.ja.md",
+            ("load 可能な local policy directory", "checkpoint を load できることを確認"),
+        ),
+    ):
+        text = " ".join((REPO_ROOT / path).read_text().split())
+        for marker in false_markers:
+            assert marker not in text, f"{marker!r} remains in {path}"
+
+
+def test_workflow_assets_show_only_the_portable_boundary():
+    required_markers = (
+        "W&amp;B dataset Artifact",
+        "dataset download/materialize",
+        "local dataset tree",
+        "upstream lerobot-train --dataset.root",
+        "local trained model",
+        "model upload/promote",
+        "No automatic training lifecycle",
+    )
+    forbidden_markers = ("Auto-Upload", "W&amp;B SDK", "automatic training result", "all data saved")
+    for name in ("wandb-workflow-overview-en.svg", "wandb-workflow-overview-ja.svg"):
+        text = (REPO_ROOT / "assets" / name).read_text()
+        for marker in required_markers:
+            assert marker in text, f"{marker!r} missing from {name}"
+        for marker in forbidden_markers:
+            assert marker not in text, f"{marker!r} remains in {name}"

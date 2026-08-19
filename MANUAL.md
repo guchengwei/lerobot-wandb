@@ -1,6 +1,6 @@
 # W&B companion manual for LeRobot (SO-101 example)
 
-![W&B companion workflow overview](./assets/wandb-workflow-overview-en.jpg)
+![W&B companion workflow overview](./assets/wandb-workflow-overview-en.svg)
 
 [Manual (日本語)](./MANUAL.ja.md) · [Project README](./README.md)
 
@@ -219,7 +219,9 @@ rollout and Registry use.
 
 ## 5. Upload and fetch the trained model
 
-Upload the local, loadable policy directory as a versioned model Artifact:
+Upload the local policy directory as a versioned model Artifact. The pre-upload structural
+validation checks expected configuration and weight files; it does not load or execute the
+weights. Perform model-specific validation before rollout:
 
 ```bash
 lerobot-wandb model upload \
@@ -230,7 +232,9 @@ lerobot-wandb model upload \
   --alias candidate
 ```
 
-The companion validates the model manifest before creating its upload Run. An optional
+The companion validates the model manifest before creating its upload Run. This is structural
+validation only; it checks expected configuration and weight files, but does not load or execute
+the weights. An optional
 `--registry-collection pick-cube-policy` can link a self-contained model into the unified W&B
 Registry; an adapter-only or otherwise non-deployable directory is still uploaded but is refused a
 deployable Registry link.
@@ -250,8 +254,9 @@ the mutable alias when recording rollout lineage:
 export MODEL_REF="your-wandb-entity/so101-pick-cube/pick-cube-policy:v0"
 ```
 
-The resulting directory is a local upstream policy path. The download is transactional and checks
-that the checkpoint can be loaded before moving it into the requested destination.
+The resulting directory is a local upstream policy path. The download is transactional and repeats
+structural validation of the expected configuration and weight files; it does not load or execute
+the weights. Perform model-specific validation before rollout.
 
 ## 6. Roll out on the robot and publish the result
 

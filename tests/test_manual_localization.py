@@ -34,8 +34,8 @@ def test_manuals_keep_the_same_executable_command_blocks():
 def test_manuals_keep_language_specific_assets_and_cross_links():
     english = (REPO_ROOT / "MANUAL.md").read_text()
     japanese = (REPO_ROOT / "MANUAL.ja.md").read_text()
-    assert "assets/wandb-workflow-overview-en.jpg" in english
-    assert "assets/wandb-workflow-overview-ja.jpg" in japanese
+    assert "assets/wandb-workflow-overview-en.svg" in english
+    assert "assets/wandb-workflow-overview-ja.svg" in japanese
     assert "MANUAL.ja.md" in english
     assert "MANUAL.md" in japanese
     assert "日本語" in japanese

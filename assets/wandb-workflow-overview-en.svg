@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">Portable W&amp;B companion workflow</title>
+  <desc id="desc">Portable sequence: W&amp;B dataset Artifact -&gt; dataset download/materialize -&gt; local dataset tree -&gt; upstream lerobot-train --dataset.root -&gt; local trained model -&gt; model upload/promote. An optional rollout preview is Run Media only. No automatic training lifecycle.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#4b5563" />
+    </marker>
+    <style>
+      .title { font: 700 28px 'DejaVu Sans', sans-serif; fill: #111827; }
+      .subtitle { font: 16px 'DejaVu Sans', sans-serif; fill: #4b5563; }
+      .box { fill: #ffffff; stroke: #2563eb; stroke-width: 2; rx: 12; }
+      .label { font: 700 17px 'DejaVu Sans', sans-serif; fill: #111827; text-anchor: middle; }
+      .small { font: 14px 'DejaVu Sans', sans-serif; fill: #374151; text-anchor: middle; }
+      .arrow { stroke: #4b5563; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+      .optional { fill: #f9fafb; stroke: #6b7280; stroke-width: 2; stroke-dasharray: 8 6; rx: 12; }
+      .optional-label { font: 700 16px 'DejaVu Sans', sans-serif; fill: #374151; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="760" fill="#f3f4f6" />
+  <text x="60" y="58" class="title">Portable W&amp;B companion boundary</text>
+  <text x="60" y="88" class="subtitle">Manual transfer only — no monkey-patching and no automatic training lifecycle</text>
+
+  <rect x="45" y="125" width="190" height="110" class="box" />
+  <text x="140" y="168" class="label">W&amp;B dataset Artifact</text>
+  <text x="140" y="198" class="small">immutable bytes</text>
+
+  <rect x="280" y="125" width="210" height="110" class="box" />
+  <text x="385" y="160" class="label">dataset</text>
+  <text x="385" y="186" class="label">download/materialize</text>
+  <text x="385" y="214" class="small">lerobot-wandb</text>
+
+  <rect x="535" y="125" width="190" height="110" class="box" />
+  <text x="630" y="168" class="label">local dataset tree</text>
+  <text x="630" y="198" class="small">on local disk</text>
+
+  <rect x="770" y="125" width="220" height="110" class="box" />
+  <text x="880" y="160" class="label">upstream lerobot-train</text>
+  <text x="880" y="186" class="label">--dataset.root</text>
+  <text x="880" y="214" class="small">ordinary LeRobot</text>
+
+  <rect x="1035" y="125" width="120" height="110" class="box" />
+  <text x="1095" y="168" class="label">local</text>
+  <text x="1095" y="194" class="label">trained model</text>
+
+  <path d="M235 180 H280" class="arrow" />
+  <path d="M490 180 H535" class="arrow" />
+  <path d="M725 180 H770" class="arrow" />
+  <path d="M990 180 H1035" class="arrow" />
+
+  <rect x="420" y="310" width="360" height="115" class="box" />
+  <text x="600" y="354" class="label">model upload/promote</text>
+  <text x="600" y="384" class="small">lerobot-wandb · separate command</text>
+  <text x="600" y="408" class="small">no model bytes move during promotion</text>
+  <path d="M1095 235 C1095 275 600 275 600 310" class="arrow" />
+
+  <rect x="75" y="515" width="1050" height="170" class="optional" />
+  <text x="105" y="550" class="optional-label">OPTIONAL ROLLOUT PREVIEW (Run Media only)</text>
+  <text x="105" y="578" class="subtitle">After local model download: upstream rollout writes a local tree; upload is still a separate manual step.</text>
+  <text x="105" y="625" class="small" text-anchor="start">local model → lerobot-rollout → local rollout tree → lerobot-wandb rollout upload</text>
+  <text x="105" y="655" class="small" text-anchor="start">Browser-compatible preview is a display derivative, never canonical training data.</text>
+</svg>
