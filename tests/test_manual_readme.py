@@ -141,6 +141,37 @@ def test_manual_model_validation_describes_structural_checks_only():
             assert marker not in text, f"{marker!r} remains in {path}"
 
 
+def test_materialized_term_requires_a_completed_artifact_download():
+    readme = " ".join((REPO_ROOT / "README.md").read_text().split())
+    english = " ".join((REPO_ROOT / "MANUAL.md").read_text().split())
+    japanese = " ".join((REPO_ROOT / "MANUAL.ja.md").read_text().split())
+    for marker in (
+        "Validate local dataset/model directories before upload",
+        "after an Artifact download completes",
+        "materialized dataset/model files on local disk",
+    ):
+        assert marker in readme, marker
+    for marker in (
+        "Validate the local dataset directory before upload",
+        "Before upload, validate the local model directory",
+        "After the Artifact download completes",
+        "materialized dataset/model",
+        "read path does not need a W&B network connection",
+    ):
+        assert marker in english, marker
+    for marker in (
+        "upload 前に local dataset directory を検証",
+        "upload 前に local model directory を",
+        "Artifact の download が完了",
+        "materialized dataset/model",
+        "read path で W&B network に接続する必要はありません",
+    ):
+        assert marker in japanese, marker
+    stale = "materialize local LeRobot dataset/model directories before or after transfer"
+    assert stale not in english
+    assert stale not in japanese
+
+
 def test_manual_overview_caption_and_contract_boundaries_are_explicit():
     english = (REPO_ROOT / "MANUAL.md").read_text()
     japanese = (REPO_ROOT / "MANUAL.ja.md").read_text()

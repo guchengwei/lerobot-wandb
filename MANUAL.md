@@ -107,7 +107,7 @@ lifecycle. In particular:
 | Surface | Companion contract |
 | --- | --- |
 | W&B-backed remote lifecycle | Resolve requested refs, preserve immutable lineage, and record transfer metadata. |
-| materialized dataset/model | Validate and materialize local LeRobot dataset/model directories before or after transfer. |
+| materialized dataset/model | Validate local dataset/model directories before upload; after an Artifact download completes, the downloaded contents on local disk are materialized and can be read without network access. |
 | Artifact transfer | Upload and download canonical dataset, model, and rollout Artifact bytes. |
 | dataset review preview | Publish bounded Run Media for inspection; preview media never replaces canonical dataset bytes. |
 | rollout Artifact | Upload a distinct rollout Artifact with the evaluated model as a lineage input. |
@@ -115,6 +115,11 @@ lifecycle. In particular:
 
 These companion operations are explicit commands around upstream LeRobot. They are not an automatic
 training hook, streaming recorder, deployment controller, or same-run model-publication lifecycle.
+
+The term “materialized” has a narrow meaning here. Before upload, validate the local dataset or model
+directory as the Artifact source. We call the contents a materialized dataset/model only after the
+corresponding Artifact download completes and the expected files are on local disk. Upstream reads
+that local tree directly; the read path does not need a W&B network connection.
 
 The companion runs alongside an existing upstream LeRobot without replacing it. Its distribution
 leaves LeRobot as a runtime companion rather than a hard resolver dependency, so commands that
@@ -180,7 +185,7 @@ validated and uploaded. Keep the root outside any temporary preview directory.
 
 ## 2. Upload the dataset Artifact and review media
 
-Validate and publish the local dataset with the companion:
+Validate the local dataset directory before upload, then publish it with the companion:
 
 ```bash
 lerobot-wandb dataset upload \
@@ -218,6 +223,9 @@ lerobot-wandb dataset download \
 The companion creates a lineage Run, resolves the requested reference, validates the downloaded
 tree, and writes the files under `./datasets/pick-cube`. If an alias is used, record the resolved
 `vN` reference printed by the command; the alias can point to another version later.
+
+After the Artifact download completes, the files under `./datasets/pick-cube` are the materialized
+dataset on local disk. Upstream LeRobot can read this tree without a W&B network connection.
 
 ## 4. Train with upstream LeRobot from the local tree
 
@@ -257,9 +265,9 @@ rollout and Registry use.
 
 ## 5. Upload and fetch the trained model
 
-Upload the local policy directory as a versioned model Artifact. The pre-upload structural
-validation checks expected configuration and weight files; it does not load or execute the
-weights. Perform model-specific validation before rollout:
+Before upload, validate the local model directory as the source for a versioned model Artifact. The
+pre-upload structural validation checks expected configuration and weight files; it does not load or
+execute the weights. Perform model-specific validation before rollout:
 
 ```bash
 lerobot-wandb model upload \
@@ -292,9 +300,11 @@ the mutable alias when recording rollout lineage:
 export MODEL_REF="your-wandb-entity/so101-pick-cube/pick-cube-policy:v0"
 ```
 
-The resulting directory is a local upstream policy path. The download is transactional and repeats
-structural validation of the expected configuration and weight files; it does not load or execute
-the weights. Perform model-specific validation before rollout.
+The resulting directory is a local upstream policy path. After the Artifact download completes, its
+contents are the materialized model on local disk, and the read path does not need a W&B network
+connection. The download is transactional and repeats structural validation of the expected
+configuration and weight files; it does not load or execute the weights. Perform model-specific
+validation before rollout.
 
 ## 6. Roll out on the robot and publish the result
 

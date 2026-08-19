@@ -105,7 +105,7 @@ lifecycle ではありません。具体的には次のとおりです。
 | Surface | Companion contract |
 | --- | --- |
 | W&B-backed remote lifecycle | requested ref を解決し、immutable lineage と transfer metadata を記録します。 |
-| materialized dataset/model | local LeRobot dataset/model directory を検証し、transfer の前後で materialize します。 |
+| materialized dataset/model | upload 前に local dataset/model directory を検証します。Artifact の download 完了後、local disk 上の内容が materialized となり、network なしで読み取れます。 |
 | Artifact transfer | canonical dataset、model、rollout の Artifact byte を upload / download します。 |
 | dataset review preview | inspection 用に bounded な Run Media を公開します。canonical dataset byte の代わりにはなりません。 |
 | rollout Artifact | 評価した model を lineage input として宣言した、別個の rollout Artifact を upload します。 |
@@ -114,6 +114,11 @@ lifecycle ではありません。具体的には次のとおりです。
 これらは upstream LeRobot の周囲で明示的に実行する companion command です。training hook、
 streaming recorder、deployment controller、同じ Run での model publication を自動化する lifecycle
 ではありません。
+
+ここでの「materialized」には明確な意味があります。upload 前は、local dataset/model directory を
+Artifact の source として検証します。対応する Artifact の download が完了し、期待される file が
+local disk に揃った後の内容を materialized dataset/model と呼びます。upstream はその local tree
+を直接読み、read path で W&B network に接続する必要はありません。
 
 companion は既存の upstream LeRobot と同じ environment で動き、LeRobot を runtime companion として
 利用します。base distribution は resolver が既存の LeRobot を置き換えないよう hard dependency に
@@ -179,7 +184,7 @@ local の `repo_id` は LeRobot が使う label で、`root` は validation し�
 
 ## 2. Dataset Artifact と review media を upload する
 
-local dataset を companion で validation して publish します。
+upload 前に local dataset directory を検証し、その tree を companion で publish します。
 
 ```bash
 lerobot-wandb dataset upload \
@@ -217,6 +222,10 @@ lerobot-wandb dataset download \
 companion は lineage Run を作り、指定 reference を解決し、download tree を validation して、
 `./datasets/pick-cube` に file を配置します。alias を使った場合は、表示された resolved `vN`
 reference を記録してください。後から alias が別 version を指すことがあります。
+
+Artifact の download が完了すると、`./datasets/pick-cube` の file は local disk 上の materialized
+dataset です。upstream LeRobot はこの tree を読み、read path で W&B network に接続する必要は
+ありません。
 
 ## 4. Local tree を使って upstream LeRobot で training する
 
@@ -258,9 +267,9 @@ checkpoint を publish してください。
 
 ## 5. Trained model を upload / fetch する
 
-local policy directory を versioned model Artifact として upload します。upload 前の構造検証は
-expected config file と weight file の存在を確認しますが、weight を load/execute しません。
-rollout 前に model-specific validation を実施してください。
+upload 前に local model directory を versioned model Artifact の source として検証します。構造検証は
+expected config file と weight file の存在を確認しますが、weight を load/execute しません。rollout
+前に model-specific validation を実施してください。
 
 ```bash
 lerobot-wandb model upload \
@@ -292,9 +301,11 @@ command が表示する full immutable reference を `MODEL_REF` に保存しま
 export MODEL_REF="your-wandb-entity/so101-pick-cube/pick-cube-policy:v0"
 ```
 
-生成された directory は local の upstream policy path です。download は transactional に行われ、
-expected config file と weight file の存在を再度構造検証しますが、weight を load/execute しません。
-rollout 前に model-specific validation を実施してください。
+生成された directory は local の upstream policy path です。Artifact の download が完了すると、
+その内容は local disk 上の materialized model となり、read path で W&B network に接続する必要は
+ありません。download は transactional に行われ、expected config file と weight file の存在を再度
+構造検証しますが、weight を load/execute しません。rollout 前に model-specific validation を実施
+してください。
 
 ## 6. Robot で rollout し結果を publish する
 

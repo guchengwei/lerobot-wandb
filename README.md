@@ -108,9 +108,11 @@ lerobot-wandb model promote \
 `--dataset.repo_id` if your materialized dataset uses another label; replace the
 example entity, project, Artifact names, and policy settings with your values.
 
-The companion contract covers a W&B-backed remote lifecycle around materialized
-dataset/model directories:
+The companion contract covers a W&B-backed remote lifecycle for local directories:
 
+- Validate local dataset/model directories before upload;
+- after an Artifact download completes, the downloaded contents are materialized
+  dataset/model files on local disk and can be read without a W&B network connection;
 - Artifact transfer, requested/resolved refs, sidecars, and lineage metadata;
 - dataset review preview media that never replaces canonical dataset bytes;
 - rollout Artifact publication with the evaluated model declared as lineage input;
