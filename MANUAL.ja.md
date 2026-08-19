@@ -201,8 +201,10 @@ lerobot-train \
   --policy.push_to_hub=false
 ```
 
-この training command は W&B から独立しています。materialize した LeRobot tree を読み、local
-checkpoint を保存します。上の `output_dir` では final policy は通常
+この training command は upstream LeRobot の control 下で実行され、companion の W&B transfer command
+とは別の step です。materialize した LeRobot tree を読み、local checkpoint を保存します。upstream
+LeRobot 側で optional な W&B logging を有効にする場合も、この境界は変わりません。上の
+`output_dir` では final policy は通常
 `./outputs/train/act_pick_cube/checkpoints/last/pretrained_model` の下に作られますが、policy と
 training configuration によって異なるため log と checkpoint layout を確認してください。companion
 は path を推測・書き換えません。

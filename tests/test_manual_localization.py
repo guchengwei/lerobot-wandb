@@ -39,3 +39,10 @@ def test_manuals_keep_language_specific_assets_and_cross_links():
     assert "MANUAL.ja.md" in english
     assert "MANUAL.md" in japanese
     assert "日本語" in japanese
+
+
+def test_japanese_training_boundary_matches_the_upstream_companion_scope():
+    japanese = " ".join((REPO_ROOT / "MANUAL.ja.md").read_text().split())
+    assert "upstream LeRobot の control 下" in japanese
+    assert "companion の W&B transfer command とは別" in japanese
+    assert "W&B から独立しています" not in japanese
