@@ -6,7 +6,8 @@ models, and rollout datasets through W&B Artifacts without patching or replacing
 LeRobot.
 
 The standalone package version is 0.1.0. It is not published to PyPI yet; the
-repository checkout is the installable source for this migration PR.
+repository checkout is the current installable source while the first release is
+prepared.
 
 The names are intentionally stable:
 
@@ -17,6 +18,16 @@ The names are intentionally stable:
 This is a companion distribution, not a native LeRobot plugin. Upstream LeRobot
 does not currently expose a generic dataset-storage or training-lifecycle plugin
 contract for this integration.
+
+## Manual
+
+For the reader-facing, SO-101-oriented workflow, start with the [Manual](./MANUAL.md)
+or [Manual (日本語)](./MANUAL.ja.md). The shortest route is to materialize a W&B
+dataset into a local LeRobot tree, run ordinary upstream `lerobot-train` from that
+root, then upload and promote the resulting local model with this companion.
+
+The manual uses the Git source-install route because the first PyPI release is future
+work; `pip install lerobot-wandb` is not an available release path yet.
 
 ## Install
 
@@ -105,7 +116,7 @@ the smaller of 250 MiB and 20% of the canonical dataset directory. Use
 
 The following are deliberately not reproduced here:
 
-- `DatasetConfig.artifact_ref` in `lerobot-train`;
+- train-time W&B Artifact references in the fork's `lerobot-train`;
 - training-time dataset materialization inside the train command;
 - W&B-specific final-model fields or publication on the same training run;
 - monkey-patching, import-time mutation, or replacement of upstream LeRobot CLIs.
