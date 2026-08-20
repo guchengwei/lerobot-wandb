@@ -32,6 +32,7 @@ from lerobot_wandb.dataset_preview import (
 from lerobot_wandb.dataset_transfer import DatasetPreviewSource, TransferDataset
 from lerobot_wandb.inspect import DatasetDirectoryError, DatasetDirectoryMetadata
 
+
 @dataclass
 class CapturedTable:
     columns: list[str]
@@ -837,8 +838,7 @@ def test_former_episode_limit_does_not_reject_60_explicit_sources(tmp_path, monk
     root = tmp_path / "dataset"
     dataset = _transfer_dataset(root)
     sources = [
-        DatasetPreviewSource(episode, "camera.front", Path(f"episode-{episode}.mp4"))
-        for episode in range(60)
+        DatasetPreviewSource(episode, "camera.front", Path(f"episode-{episode}.mp4")) for episode in range(60)
     ]
     prepare, init, upload, _run = _patch_row_preflight_dependencies(monkeypatch, dataset, sources)
     args = _args(root)

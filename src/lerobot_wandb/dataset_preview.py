@@ -287,7 +287,6 @@ class _PreviewProgress:
         self._emit("complete")
 
 
-
 def canonical_directory_bytes(root: Path | str) -> int:
     """Measure canonical dataset bytes without following directory symlinks."""
 
