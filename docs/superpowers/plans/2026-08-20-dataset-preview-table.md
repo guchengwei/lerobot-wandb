@@ -189,6 +189,7 @@ class CapturedTable:
     columns: list[str]
     data: list[list[object]]
 
+
 monkeypatch.setattr(cli.wandb, "Table", CapturedTable)
 ```
 
@@ -200,8 +201,14 @@ Replace `test_default_representative_media_key_is_schema_neutral` and dynamic-ke
 
 ```python
 assert table.columns == [
-    "episode", "camera", "camera_key", "selection", "video",
-    "source_path", "preview_bytes", "transcoded",
+    "episode",
+    "camera",
+    "camera_key",
+    "selection",
+    "video",
+    "source_path",
+    "preview_bytes",
+    "transcoded",
 ]
 assert list(run.log.call_args.args[0]) == ["dataset_previews"]
 ```
@@ -284,13 +291,7 @@ If existing repo naming/type-check conventions prefer an immutable tuple for the
 Derive once:
 
 ```python
-selection = (
-    "all"
-    if args.preview_all
-    else "explicit"
-    if args.preview_episodes
-    else "representative"
-)
+selection = "all" if args.preview_all else "explicit" if args.preview_episodes else "representative"
 ```
 
 Then publish only:
