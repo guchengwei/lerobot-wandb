@@ -83,11 +83,13 @@ def test_english_readme_documents_the_companion_command_route():
         "companion CLI for an existing LeRobot installation",
         "not a native LeRobot plugin",
         ">=0.6.1,<0.6.2",
+        "uv venv --python 3.12",
+        'uv pip install "lerobot[core_scripts,training,feetech]==0.6.1"',
         'pip install "lerobot-wandb @ git+https://github.com/guchengwei/lerobot-wandb.git"',
         "lerobot-wandb dataset download",
-        "--root ./datasets/pick-cube",
+        '--root "$TRAIN_DATASET_ROOT"',
         "lerobot-train",
-        "--dataset.root=./datasets/pick-cube",
+        '--dataset.root="$TRAIN_DATASET_ROOT"',
         "lerobot-wandb model upload",
         "lerobot-wandb model promote",
     )
@@ -112,11 +114,28 @@ def test_user_docs_frame_lerobot_wandb_as_a_companion_alongside_upstream_lerobot
 def test_readme_train_example_uses_the_upstream_dataset_root_and_checkpoint_layout():
     readme = (REPO_ROOT / "README.md").read_text()
     for marker in (
-        "--dataset.repo_id=local/pick-cube",
-        "--dataset.root=./datasets/pick-cube",
-        "--root ./outputs/train/act_pick_cube/checkpoints/last/pretrained_model",
+        '--dataset.repo_id="local/$DATASET_NAME"',
+        '--dataset.root="$TRAIN_DATASET_ROOT"',
+        'export POLICY_ROOT="$TRAIN_OUTPUT/checkpoints/last/pretrained_model"',
+        '--root "$POLICY_ROOT"',
     ):
         assert marker in readme, marker
+
+
+def test_readmes_use_reusable_workflow_names_instead_of_sample_artifact_names():
+    for path in PRIMARY_DOCS:
+        text = path.read_text()
+        for variable in (
+            "DATASET_NAME",
+            "POLICY_NAME",
+            "ROLLOUT_NAME",
+            "TRAIN_DATASET_ROOT",
+            "POLICY_ROOT",
+            "ROLLOUT_ROOT",
+        ):
+            assert f"${variable}" in text, (path, variable)
+        for sample_name in ("pick-cube", "pick_cube", "so101-pick-cube"):
+            assert sample_name not in text, (path, sample_name)
 
 
 def test_readmes_describe_structural_model_checks_only():
