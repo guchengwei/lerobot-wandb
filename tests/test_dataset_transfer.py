@@ -205,7 +205,7 @@ def test_v21_preview_all_selects_every_episode_and_camera(tmp_path):
     dataset = inspect_transfer_dataset(root)
 
     previews = select_dataset_preview_sources(dataset, preview_all=True)
-    assert len(previews) == dataset.metadata.total_episodes * len(dataset.video_keys)
+    assert len(previews) == dataset.metadata.total_episodes * len(dataset.metadata.video_keys)
 
     assert [(preview.episode, preview.video_key) for preview in previews] == [
         (0, "observation.images.front"),
@@ -223,7 +223,7 @@ def test_preview_all_selects_more_than_former_episode_limit(tmp_path):
 
     sources = select_dataset_preview_sources(dataset, preview_all=True)
 
-    assert len(sources) == dataset.metadata.total_episodes * len(dataset.video_keys)
+    assert len(sources) == dataset.metadata.total_episodes * len(dataset.metadata.video_keys)
 
 
 def test_preview_all_rejects_explicit_episode_selectors(tmp_path):
