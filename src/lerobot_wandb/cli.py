@@ -54,6 +54,7 @@ import argparse
 import contextlib
 import logging
 import math
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -65,7 +66,6 @@ from .dataset_preview import (
     PreparedPreviewBatch,
     PreviewBudgetExceededError,
     PreviewProgressEvent,
-    dataset_media_key,
     prepare_dataset_previews,
 )
 from .dataset_transfer import (
@@ -99,9 +99,49 @@ from .store import (
 DATASET_ARTIFACT_TYPE = "dataset"
 DATASET_PREVIEW_TABLE_MAX_ROWS = 10_000
 
-# Kept as a local alias for the CLI's existing private seam; the Workspace contract itself lives
-# with the preview value object and is shared by any future publication surface.
-_dataset_media_key = dataset_media_key
+_DATASET_PREVIEW_TABLE_COLUMNS = [
+    "episode",
+    "camera",
+    "camera_key",
+    "selection",
+    "video",
+    "source_path",
+    "preview_bytes",
+    "transcoded",
+]
+
+
+def _dataset_preview_camera(video_key: str) -> str:
+    parts = [part for part in re.split(r"[./]", video_key) if part]
+    if not parts:
+        raise DatasetDirectoryError("Dataset preview camera key has no non-empty component")
+    return parts[-1]
+
+
+def _dataset_preview_table(
+    preview_batch: PreparedPreviewBatch,
+    *,
+    selection: str,
+) -> wandb.Table:
+    rows = []
+    for prepared in preview_batch.previews:
+        episode = prepared.source.episode
+        if episode is None:
+            raise DatasetDirectoryError("Dataset preview source is missing an episode index")
+        camera_key = prepared.source.video_key
+        rows.append(
+            [
+                episode,
+                _dataset_preview_camera(camera_key),
+                camera_key,
+                selection,
+                wandb.Video(str(prepared.path), format="mp4"),
+                prepared.source.relative_path.as_posix(),
+                prepared.bytes,
+                not prepared.used_source,
+            ]
+        )
+    return wandb.Table(columns=_DATASET_PREVIEW_TABLE_COLUMNS, data=rows)
 
 
 class _PreviewProgressRenderer:
@@ -291,6 +331,7 @@ def cmd_dataset_upload(args: argparse.Namespace) -> None:
             preview_all=args.preview_all,
         )
     )
+    selection = "all" if args.preview_all else "explicit" if args.preview_episodes else "representative"
     if len(sources) > DATASET_PREVIEW_TABLE_MAX_ROWS:
         raise DatasetDirectoryError(
             f"Dataset preview selection produced {len(sources):,} episode-camera rows, "
@@ -347,16 +388,16 @@ def cmd_dataset_upload(args: argparse.Namespace) -> None:
                 metadata=dataset.metadata.to_wandb_metadata(),
             )
             if preview_batch is not None and preview_batch.previews:
-                # Artifact files are canonical bytes, not W&B run media. Explicit wandb.Video
-                # values make the selected H.264 previews visible in W&B's Media browser.
-                media = {}
-                used_media_keys: set[str] = set()
-                for index, prepared in enumerate(preview_batch.previews):
-                    source = prepared.source
-                    media_key = _dataset_media_key(source, index, used_keys=used_media_keys)
-                    used_media_keys.add(media_key)
-                    media[media_key] = wandb.Video(str(prepared.path), format="mp4")
-                run.log(media)
+                # Artifact files are canonical bytes, not W&B run media. The Table keeps review
+                # metadata filterable while wandb.Video makes each selected preview playable.
+                run.log(
+                    {
+                        "dataset_previews": _dataset_preview_table(
+                            preview_batch,
+                            selection=selection,
+                        )
+                    }
+                )
             run.summary.update(
                 _dataset_upload_summary(
                     args=args,

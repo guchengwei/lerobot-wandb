@@ -14,6 +14,7 @@
 
 import argparse
 import io
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -30,6 +31,11 @@ from lerobot_wandb.dataset_preview import (
 )
 from lerobot_wandb.dataset_transfer import DatasetPreviewSource, TransferDataset
 from lerobot_wandb.inspect import DatasetDirectoryError, DatasetDirectoryMetadata
+
+@dataclass
+class CapturedTable:
+    columns: list[str]
+    data: list[list[object]]
 
 
 def _transfer_dataset(
@@ -125,6 +131,7 @@ def _patch_dataset_upload(
     run.project = "my-project"
     monkeypatch.setattr(cli.wandb, "init", lambda **_kwargs: run)
     monkeypatch.setattr(cli.wandb, "Video", lambda path, **_kwargs: f"video:{path}")
+    monkeypatch.setattr(cli.wandb, "Table", CapturedTable)
     monkeypatch.setattr(
         cli,
         "upload_directory",
@@ -210,17 +217,50 @@ def test_force_preview_budget_is_dataset_upload_only():
         )
 
 
-def test_default_representative_media_key_is_schema_neutral():
+@pytest.mark.parametrize(
+    ("preview_episodes", "preview_all", "selection"),
+    [
+        (None, False, "representative"),
+        ([7], False, "explicit"),
+        (None, True, "all"),
+    ],
+)
+def test_dataset_upload_table_uses_selection_mode(
+    tmp_path,
+    monkeypatch,
+    preview_episodes,
+    preview_all,
+    selection,
+):
+    root = tmp_path / "dataset"
+    root.mkdir()
+    source_path = root / "videos/episode_000007.mp4"
+    source_path.parent.mkdir()
+    source_path.write_bytes(b"source")
     source = DatasetPreviewSource(
         episode=7,
-        video_key="observation.images.front/left",
-        relative_path=Path("video.mp4"),
-        is_representative=True,
+        video_key="observation.images.front",
+        relative_path=source_path.relative_to(root),
+        is_representative=selection == "representative",
     )
+    dataset = _transfer_dataset(root)
+    run, _prepare_calls = _patch_dataset_upload(
+        monkeypatch,
+        dataset,
+        source,
+        lambda destination_dir: _prepared_batch(source, destination_dir),
+    )
+    args = _args(root)
+    args.preview_episodes = preview_episodes
+    args.preview_all = preview_all
 
-    assert cli._dataset_media_key(source, 0) == (
-        "dataset_video/representative/observation.images.front%2Fleft"
-    )
+    cli.cmd_dataset_upload(args)
+
+    payload = run.log.call_args.args[0]
+    assert list(payload) == ["dataset_previews"]
+    table = payload["dataset_previews"]
+    assert table.data[0][0] == 7
+    assert table.data[0][3] == selection
 
 
 def test_dataset_upload_logs_playable_preview_and_keeps_it_through_finish(tmp_path, monkeypatch):
@@ -295,6 +335,7 @@ def test_dataset_upload_logs_playable_preview_and_keeps_it_through_finish(tmp_pa
         return f"video:{path}"
 
     monkeypatch.setattr(cli.wandb, "Video", _video)
+    monkeypatch.setattr(cli.wandb, "Table", CapturedTable)
 
     upload_calls = []
 
@@ -320,87 +361,119 @@ def test_dataset_upload_logs_playable_preview_and_keeps_it_through_finish(tmp_pa
     assert upload_calls[0][1] == root
     assert upload_calls[0][2]["metadata"]["schema_version"] == "v2.1"
     run.log.assert_called_once()
-    media = run.log.call_args.args[0]
-    assert list(media) == ["dataset_video/episode_000010/observation.images.wrist"]
-    assert str(state["preview"]) in media[next(iter(media))]
+    payload = run.log.call_args.args[0]
+    assert list(payload) == ["dataset_previews"]
+    table = payload["dataset_previews"]
+    assert table.columns == [
+        "episode",
+        "camera",
+        "camera_key",
+        "selection",
+        "video",
+        "source_path",
+        "preview_bytes",
+        "transcoded",
+    ]
+    assert table.data == [
+        [
+            10,
+            "wrist",
+            "observation.images.wrist",
+            "explicit",
+            f"video:{state['preview']}",
+            "videos/chunk-000/observation.images.wrist/episode_000010.mp4",
+            12,
+            True,
+        ]
+    ]
     assert video_calls == [(str(state["preview"]), {"format": "mp4"})]
     summary = run.summary.update.call_args.args[0]
+    assert {
+        key: summary[key]
+        for key in (
+            "dataset_preview_representative_episode_index",
+            "dataset_preview_episode_indices",
+            "dataset_preview_count",
+            "dataset_preview_bytes",
+            "dataset_preview_budget_bytes",
+        )
+    } == {
+        "dataset_preview_representative_episode_index": None,
+        "dataset_preview_episode_indices": [10],
+        "dataset_preview_count": 1,
+        "dataset_preview_bytes": 12,
+        "dataset_preview_budget_bytes": 20,
+    }
     assert summary["dataset_schema_version"] == "v2.1"
-    assert summary["dataset_preview_representative_episode_index"] is None
-    assert summary["dataset_preview_episode_indices"] == [10]
     assert summary["dataset_artifact_resolved_ref"] == "my-team/my-project/pick-cube-v21:v0"
     run.finish.assert_called_once()
     assert not Path(state["preview"]).exists()
 
 
-def test_dataset_upload_media_keys_preserve_exact_camera_identity(tmp_path, monkeypatch):
-    root = tmp_path / "dataset"
-    video_keys = ("observation.images.front", "observation_images_front")
-    sources = []
-    for video_key in video_keys:
-        source = root / f"videos/{video_key}/episode_000010.mp4"
-        source.parent.mkdir(parents=True, exist_ok=True)
-        source.write_bytes(b"source")
-        sources.append(
-            DatasetPreviewSource(
-                episode=10,
-                video_key=video_key,
-                relative_path=source.relative_to(root),
+def test_dataset_preview_table_preserves_batch_order_and_camera_identity(tmp_path, monkeypatch):
+    specs = [
+        (3, "observation.images.front", Path("videos/dot/episode_000003.mp4"), 11, True),
+        (3, "observation/images/front", Path("videos/slash/episode_000003.mp4"), 12, False),
+        (8, "observation.images.front", Path("videos/dot/episode_000008.mp4"), 13, False),
+        (8, "observation/images/front", Path("videos/slash/episode_000008.mp4"), 14, True),
+    ]
+    previews = []
+    video_calls = []
+    for index, (episode, camera_key, relative_path, preview_bytes, used_source) in enumerate(specs):
+        path = tmp_path / f"preview-{index}.mp4"
+        path.write_bytes(b"preview")
+        previews.append(
+            PreparedDatasetPreview(
+                source=DatasetPreviewSource(
+                    episode=episode,
+                    video_key=camera_key,
+                    relative_path=relative_path,
+                ),
+                path=path,
+                bytes=preview_bytes,
+                used_source=used_source,
             )
         )
 
-    dataset = _transfer_dataset(root, video_keys=video_keys)
-    monkeypatch.setattr(cli, "inspect_transfer_dataset", lambda _root: dataset)
-    monkeypatch.setattr(
-        cli,
-        "select_dataset_preview_sources",
-        lambda _dataset, **_kwargs: sources,
+    def _video(path, **kwargs):
+        video_calls.append((path, kwargs))
+        return f"video:{path}"
+
+    monkeypatch.setattr(cli.wandb, "Video", _video)
+    monkeypatch.setattr(cli.wandb, "Table", CapturedTable)
+    batch = PreparedPreviewBatch(
+        previews=tuple(previews),
+        total_bytes=50,
+        canonical_bytes=100,
+        budget_bytes=100,
     )
 
-    def _prepare_batch(
-        _root: Path,
-        passed_sources,
-        destination_dir: Path,
-        *,
-        progress_callback,
-    ) -> PreparedPreviewBatch:
-        assert callable(progress_callback)
-        previews = []
-        for index, source in enumerate(passed_sources):
-            destination = destination_dir / f"preview-{index:06d}.mp4"
-            destination.write_bytes(b"h264-preview")
-            previews.append(
-                PreparedDatasetPreview(
-                    source=source,
-                    path=destination,
-                    bytes=destination.stat().st_size,
-                    used_source=False,
-                )
-            )
-        return PreparedPreviewBatch(
-            previews=tuple(previews),
-            total_bytes=sum(item.bytes for item in previews),
-            canonical_bytes=100,
-            budget_bytes=100,
-        )
+    table = cli._dataset_preview_table(batch, selection="all")
 
-    monkeypatch.setattr(cli, "prepare_dataset_previews", _prepare_batch)
-    run = MagicMock()
-    monkeypatch.setattr(cli.wandb, "init", lambda **kwargs: run)
-    monkeypatch.setattr(cli.wandb, "Video", lambda path, **kwargs: f"video:{path}")
-    monkeypatch.setattr(
-        cli,
-        "upload_directory",
-        lambda *args, **kwargs: SimpleNamespace(resolved_ref="my-team/my-project/pick-cube-v21:v0"),
-    )
-
-    cli.cmd_dataset_upload(_args(root))
-
-    media = run.log.call_args.args[0]
-    assert len(media) == 2
-    assert len(set(media)) == 2
-    encoded_cameras = [key.rsplit("/", 1)[1] for key in media]
-    assert encoded_cameras == ["observation.images.front", "observation_images_front"]
+    assert table.columns == [
+        "episode",
+        "camera",
+        "camera_key",
+        "selection",
+        "video",
+        "source_path",
+        "preview_bytes",
+        "transcoded",
+    ]
+    assert table.data == [
+        [
+            episode,
+            "front",
+            camera_key,
+            "all",
+            f"video:{previews[index].path}",
+            relative_path.as_posix(),
+            preview_bytes,
+            not used_source,
+        ]
+        for index, (episode, camera_key, relative_path, preview_bytes, used_source) in enumerate(specs)
+    ]
+    assert video_calls == [(str(preview.path), {"format": "mp4"}) for preview in previews]
 
 
 def test_dataset_preview_failure_happens_before_wandb_init(tmp_path, monkeypatch):
@@ -441,8 +514,11 @@ def test_dataset_no_preview_uploads_canonical_root_without_generating_media(tmp_
     prepare = MagicMock()
     monkeypatch.setattr(cli, "inspect_transfer_dataset", lambda _root: dataset)
     monkeypatch.setattr(cli, "select_dataset_preview_sources", select)
+    monkeypatch.setattr(cli, "prepare_dataset_previews", prepare)
     run = MagicMock()
     monkeypatch.setattr(cli.wandb, "init", lambda **_kwargs: run)
+    table = MagicMock()
+    monkeypatch.setattr(cli.wandb, "Table", table)
     uploaded_roots = []
 
     def _upload(_run, directory, **_kwargs):
@@ -454,10 +530,71 @@ def test_dataset_no_preview_uploads_canonical_root_without_generating_media(tmp_
     cli.cmd_dataset_upload(args)
 
     assert uploaded_roots == [root]
+    assert root.is_dir()
     select.assert_not_called()
     prepare.assert_not_called()
     run.log.assert_not_called()
+    table.assert_not_called()
+    summary = run.summary.update.call_args.args[0]
+    assert {
+        key: summary[key]
+        for key in (
+            "dataset_preview_representative_episode_index",
+            "dataset_preview_episode_indices",
+            "dataset_preview_count",
+            "dataset_preview_bytes",
+            "dataset_preview_budget_bytes",
+        )
+    } == {
+        "dataset_preview_representative_episode_index": None,
+        "dataset_preview_episode_indices": [],
+        "dataset_preview_count": 0,
+        "dataset_preview_bytes": 0,
+        "dataset_preview_budget_bytes": 0,
+    }
     run.finish.assert_called_once()
+
+
+def test_dataset_upload_reused_canonical_preview_remains_after_finish(tmp_path, monkeypatch):
+    root = tmp_path / "dataset"
+    root.mkdir()
+    source_path = root / "videos/episode_000010.mp4"
+    source_path.parent.mkdir()
+    source_path.write_bytes(b"source")
+    source = DatasetPreviewSource(
+        episode=10,
+        video_key="camera.front",
+        relative_path=source_path.relative_to(root),
+    )
+    dataset = _transfer_dataset(root)
+    batch = PreparedPreviewBatch(
+        previews=(
+            PreparedDatasetPreview(
+                source=source,
+                path=source_path,
+                bytes=6,
+                used_source=True,
+            ),
+        ),
+        total_bytes=6,
+        canonical_bytes=100,
+        budget_bytes=20,
+    )
+    run, _prepare_calls = _patch_dataset_upload(
+        monkeypatch,
+        dataset,
+        source,
+        lambda _destination: batch,
+    )
+
+    def _finish():
+        assert source_path.exists()
+
+    run.finish.side_effect = _finish
+
+    cli.cmd_dataset_upload(_args(root))
+
+    assert source_path.exists()
 
 
 def test_under_budget_preparation_proceeds_without_prompt(tmp_path, monkeypatch, capsys):

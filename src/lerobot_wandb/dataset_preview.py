@@ -36,7 +36,6 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
-from urllib.parse import quote
 
 import av
 
@@ -287,39 +286,6 @@ class _PreviewProgress:
             self.completed = self.total_work
         self._emit("complete")
 
-
-def dataset_media_key(
-    source: DatasetPreviewSource,
-    index: int,
-    *,
-    used_keys: set[str] | None = None,
-) -> str:
-    """Return the reversible, schema-neutral Workspace key for one preview.
-
-    Representative selections use the same ``representative/<camera>`` namespace for v2.1 and
-    v3. Explicit and all-episode selections use ``episode_<six-digit-index>/<camera>``. Percent
-    encoding keeps camera names reversible without guessing aliases when punctuation differs.
-    """
-
-    episode = (
-        "representative"
-        if source.is_representative or source.episode is None
-        else f"episode_{source.episode:06d}"
-    )
-    camera = quote(source.video_key, safe="")
-    key = f"dataset_video/{episode}/{camera or f'camera_{index:03d}'}"
-    if used_keys is None or key not in used_keys:
-        return key
-
-    # The percent encoding above is injective for camera keys, but retain a deterministic
-    # reversible fallback for callers that supply duplicate logical sources.
-    suffix = source.video_key.encode("utf-8").hex()
-    candidate = f"{key}__camera_{suffix}"
-    duplicate = 1
-    while candidate in used_keys:
-        candidate = f"{key}__camera_{suffix}_{duplicate}"
-        duplicate += 1
-    return candidate
 
 
 def canonical_directory_bytes(root: Path | str) -> int:
