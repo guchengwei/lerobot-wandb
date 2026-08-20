@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import json
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 
@@ -203,7 +204,8 @@ def test_v21_preview_all_selects_every_episode_and_camera(tmp_path):
     _write_v21_dataset(root, cameras=("observation.images.front", "observation.images.wrist"))
     dataset = inspect_transfer_dataset(root)
 
-    previews = select_dataset_preview_sources(dataset, preview_all=True, max_episodes=2)
+    previews = select_dataset_preview_sources(dataset, preview_all=True)
+    assert len(previews) == dataset.metadata.total_episodes * len(dataset.video_keys)
 
     assert [(preview.episode, preview.video_key) for preview in previews] == [
         (0, "observation.images.front"),
@@ -212,6 +214,16 @@ def test_v21_preview_all_selects_every_episode_and_camera(tmp_path):
         (1, "observation.images.wrist"),
     ]
 
+def test_preview_all_selects_more_than_former_episode_limit(tmp_path):
+    root = tmp_path / "v21"
+    _write_v21_dataset(root)
+    dataset = inspect_transfer_dataset(root)
+    dataset = replace(dataset, metadata=replace(dataset.metadata, total_episodes=60))
+
+    sources = select_dataset_preview_sources(dataset, preview_all=True)
+
+    assert len(sources) == dataset.metadata.total_episodes * len(dataset.video_keys)
+
 
 def test_preview_all_rejects_explicit_episode_selectors(tmp_path):
     root = tmp_path / "v21"
@@ -219,16 +231,7 @@ def test_preview_all_rejects_explicit_episode_selectors(tmp_path):
     dataset = inspect_transfer_dataset(root)
 
     with pytest.raises(DatasetDirectoryError, match="mutually exclusive"):
-        select_dataset_preview_sources(dataset, episodes=[0], preview_all=True, max_episodes=2)
-
-
-def test_preview_all_refuses_dataset_larger_than_configured_maximum(tmp_path):
-    root = tmp_path / "v21"
-    _write_v21_dataset(root)
-    dataset = inspect_transfer_dataset(root)
-
-    with pytest.raises(DatasetDirectoryError, match="2 episodes.*maximum of 1"):
-        select_dataset_preview_sources(dataset, preview_all=True, max_episodes=1)
+        select_dataset_preview_sources(dataset, episodes=[0], preview_all=True)
 
 
 def test_v21_missing_video_is_rejected(tmp_path):
@@ -395,7 +398,7 @@ def test_v3_preview_all_selects_every_episode_and_camera(tmp_path, monkeypatch):
         ],
     )
 
-    previews = select_dataset_preview_sources(dataset, preview_all=True, max_episodes=2)
+    previews = select_dataset_preview_sources(dataset, preview_all=True)
 
     assert [
         (preview.episode, preview.video_key, preview.start_timestamp_s, preview.end_timestamp_s)

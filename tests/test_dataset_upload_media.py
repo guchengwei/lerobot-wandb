@@ -29,7 +29,7 @@ from lerobot_wandb.dataset_preview import (
     PreviewBudgetExceededError,
 )
 from lerobot_wandb.dataset_transfer import DatasetPreviewSource, TransferDataset
-from lerobot_wandb.inspect import DatasetDirectoryMetadata
+from lerobot_wandb.inspect import DatasetDirectoryError, DatasetDirectoryMetadata
 
 
 def _transfer_dataset(
@@ -64,7 +64,6 @@ def _args(root: Path) -> argparse.Namespace:
         aliases=["raw"],
         preview_episodes=[10],
         preview_all=False,
-        preview_max_episodes=50,
         no_preview=False,
         force_preview_budget=False,
     )
@@ -157,16 +156,25 @@ def test_dataset_preview_all_is_mutually_exclusive_with_explicit_episodes(capsys
     assert "not allowed with argument" in capsys.readouterr().err
 
 
-def test_dataset_preview_all_has_a_positive_configurable_default_limit():
+def test_preview_max_episodes_is_rejected(capsys):
     parser = cli.build_parser()
-    base = ["dataset", "upload", "--root", "dataset", "--project", "project", "--name", "name"]
-
-    args = parser.parse_args([*base, "--preview-all"])
-
-    assert args.preview_all is True
-    assert args.preview_max_episodes == 50
     with pytest.raises(SystemExit):
-        parser.parse_args([*base, "--preview-all", "--preview-max-episodes", "0"])
+        parser.parse_args(
+            [
+                "dataset",
+                "upload",
+                "--root",
+                "dataset",
+                "--project",
+                "project",
+                "--name",
+                "name",
+                "--preview-all",
+                "--preview-max-episodes",
+                "51",
+            ]
+        )
+    assert "unrecognized arguments: --preview-max-episodes 51" in capsys.readouterr().err
 
 
 def test_force_preview_budget_is_dataset_upload_only():
@@ -616,26 +624,94 @@ def test_force_preview_budget_skips_prompt_without_reencoding(tmp_path, monkeypa
     assert len(prepare_calls) == 1
 
 
-def test_force_preview_budget_does_not_bypass_preview_episode_limit(tmp_path, monkeypatch):
-    root = tmp_path / "dataset"
-    root.mkdir()
-    dataset = _transfer_dataset(root)
+def _patch_row_preflight_dependencies(monkeypatch, dataset, sources):
     monkeypatch.setattr(cli, "inspect_transfer_dataset", lambda _root: dataset)
-    selection = MagicMock(side_effect=ValueError("exceeds --preview-max-episodes"))
-    monkeypatch.setattr(cli, "select_dataset_preview_sources", selection)
-    prepare = MagicMock()
-    init = MagicMock()
+    monkeypatch.setattr(cli, "select_dataset_preview_sources", MagicMock(return_value=sources))
+    prepare = MagicMock(
+        return_value=PreparedPreviewBatch(
+            previews=(),
+            total_bytes=0,
+            canonical_bytes=0,
+            budget_bytes=1,
+        )
+    )
     monkeypatch.setattr(cli, "prepare_dataset_previews", prepare)
+    run = MagicMock()
+    run.entity = "my-team"
+    run.project = "my-project"
+    init = MagicMock(return_value=run)
     monkeypatch.setattr(cli.wandb, "init", init)
+    upload = MagicMock(return_value=SimpleNamespace(resolved_ref="my-team/my-project/name:v0"))
+    monkeypatch.setattr(cli, "upload_directory", upload)
+    return prepare, init, upload, run
+
+
+@pytest.mark.parametrize(
+    "selection_args",
+    [
+        pytest.param(SimpleNamespace(preview_episodes=[], preview_all=False), id="representative"),
+        pytest.param(SimpleNamespace(preview_episodes=[0], preview_all=False), id="explicit"),
+        pytest.param(SimpleNamespace(preview_episodes=[], preview_all=True), id="all"),
+    ],
+)
+@pytest.mark.parametrize(
+    "source_count",
+    [
+        pytest.param(10_000, id="at-limit"),
+        pytest.param(10_001, id="over-limit"),
+    ],
+)
+def test_preview_row_limit_is_checked_before_upload_side_effects(
+    tmp_path,
+    monkeypatch,
+    selection_args,
+    source_count,
+):
+    root = tmp_path / "dataset"
+    dataset = _transfer_dataset(root)
+    source = DatasetPreviewSource(0, "camera.front", Path("episode.mp4"))
+    sources = [source] * source_count
+    prepare, init, upload, run = _patch_row_preflight_dependencies(monkeypatch, dataset, sources)
     args = _args(root)
-    args.preview_all = True
-    args.force_preview_budget = True
+    args.preview_episodes = selection_args.preview_episodes
+    args.preview_all = selection_args.preview_all
 
-    with pytest.raises(ValueError, match="preview-max-episodes"):
-        cli.cmd_dataset_upload(args)
+    if source_count > 10_000:
+        with pytest.raises(
+            DatasetDirectoryError,
+            match="10,001 episode-camera rows.*10,000-row W&B Table limit",
+        ):
+            cli.cmd_dataset_upload(args)
 
-    prepare.assert_not_called()
-    init.assert_not_called()
+        prepare.assert_not_called()
+        init.assert_not_called()
+        upload.assert_not_called()
+        run.log.assert_not_called()
+        return
+
+    cli.cmd_dataset_upload(args)
+
+    prepare.assert_called_once()
+    init.assert_called_once()
+    upload.assert_called_once()
+
+
+def test_former_episode_limit_does_not_reject_60_explicit_sources(tmp_path, monkeypatch):
+    root = tmp_path / "dataset"
+    dataset = _transfer_dataset(root)
+    sources = [
+        DatasetPreviewSource(episode, "camera.front", Path(f"episode-{episode}.mp4"))
+        for episode in range(60)
+    ]
+    prepare, init, upload, _run = _patch_row_preflight_dependencies(monkeypatch, dataset, sources)
+    args = _args(root)
+    args.preview_episodes = list(range(60))
+
+    cli.cmd_dataset_upload(args)
+
+    prepare.assert_called_once()
+    init.assert_called_once()
+    upload.assert_called_once()
 
 
 def test_progress_renderer_identifies_sources_and_bounds_redirected_output():

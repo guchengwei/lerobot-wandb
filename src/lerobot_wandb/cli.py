@@ -69,7 +69,6 @@ from .dataset_preview import (
     prepare_dataset_previews,
 )
 from .dataset_transfer import (
-    DEFAULT_PREVIEW_MAX_EPISODES,
     TransferDataset,
     inspect_transfer_dataset,
     select_dataset_preview_sources,
@@ -98,6 +97,7 @@ from .store import (
 )
 
 DATASET_ARTIFACT_TYPE = "dataset"
+DATASET_PREVIEW_TABLE_MAX_ROWS = 10_000
 
 # Kept as a local alias for the CLI's existing private seam; the Workspace contract itself lives
 # with the preview value object and is shared by any future publication surface.
@@ -276,13 +276,6 @@ def _confirm_preview_budget(preview_batch: PreparedPreviewBatch) -> None:
         raise _preview_budget_error(preview_batch)
 
 
-def _positive_int(value: str) -> int:
-    parsed = int(value)
-    if parsed <= 0:
-        raise argparse.ArgumentTypeError("must be greater than zero")
-    return parsed
-
-
 def cmd_dataset_upload(args: argparse.Namespace) -> None:
     # Transfer validation is version-aware: current v3 uses the current reader contract, while a
     # canonical v2.1 directory is validated locally without pretending the current reader can train
@@ -296,9 +289,14 @@ def cmd_dataset_upload(args: argparse.Namespace) -> None:
             dataset,
             episodes=args.preview_episodes,
             preview_all=args.preview_all,
-            max_episodes=args.preview_max_episodes,
         )
     )
+    if len(sources) > DATASET_PREVIEW_TABLE_MAX_ROWS:
+        raise DatasetDirectoryError(
+            f"Dataset preview selection produced {len(sources):,} episode-camera rows, "
+            f"exceeding the {DATASET_PREVIEW_TABLE_MAX_ROWS:,}-row W&B Table limit. "
+            "Select fewer episodes or use --no-preview."
+        )
 
     with contextlib.ExitStack() as exit_stack:
         preview_batch: PreparedPreviewBatch | None = None
@@ -688,15 +686,7 @@ def build_parser() -> argparse.ArgumentParser:
     preview_selectors.add_argument(
         "--preview-all",
         action="store_true",
-        help="Publish every episode and camera as separate review media. Refused when the dataset "
-        "exceeds --preview-max-episodes.",
-    )
-    dataset_upload_parser.add_argument(
-        "--preview-max-episodes",
-        type=_positive_int,
-        default=DEFAULT_PREVIEW_MAX_EPISODES,
-        help=f"Maximum episodes allowed by --preview-all (default: {DEFAULT_PREVIEW_MAX_EPISODES}). "
-        "Raise this explicitly to opt into larger review-media uploads.",
+        help="Publish every episode and camera as separate review media.",
     )
     dataset_upload_parser.add_argument(
         "--no-preview",
@@ -708,7 +698,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--force-preview-budget",
         action="store_true",
         help="Allow prepared preview media to exceed its safety byte budget without prompting. "
-        "This does not bypass dataset validation, episode limits, or encoding safeguards.",
+        "This does not bypass dataset validation, preview row limits, or encoding safeguards.",
     )
     dataset_upload_parser.set_defaults(func=cmd_dataset_upload)
 

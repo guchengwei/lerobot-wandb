@@ -58,7 +58,6 @@ V21_EPISODES_STATS_PATH = Path("meta/episodes_stats.jsonl")
 V21_TASKS_PATH = Path("meta/tasks.jsonl")
 
 DatasetLayout = Literal["v2.1", "v3"]
-DEFAULT_PREVIEW_MAX_EPISODES = 50
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,25 +103,17 @@ def select_dataset_preview_sources(
     *,
     episodes: Sequence[int] = (),
     preview_all: bool = False,
-    max_episodes: int = DEFAULT_PREVIEW_MAX_EPISODES,
 ) -> list[DatasetPreviewSource]:
-    """Select bounded review media without changing the canonical artifact.
+    """Select review media without changing the canonical artifact.
 
     With no explicit episode request, exactly one deterministic representative source is selected.
     Explicit episodes and ``preview_all`` select every camera for each selected episode. v2.1
     sources are already episode-per-file; v3 sources carry the exact timestamp range to trim from
-    their shared video file. ``preview_all`` is refused when the dataset exceeds ``max_episodes``.
+    their shared video file.
     """
     if preview_all and episodes:
         raise DatasetDirectoryError(
             "--preview-all and --preview-episode are mutually exclusive; choose one review mode."
-        )
-    if preview_all and max_episodes <= 0:
-        raise DatasetDirectoryError(f"preview maximum must be greater than zero, got {max_episodes}.")
-    if preview_all and dataset.metadata.total_episodes > max_episodes:
-        raise DatasetDirectoryError(
-            f"--preview-all selected {dataset.metadata.total_episodes} episodes, exceeding the configured "
-            f"maximum of {max_episodes}. Raise --preview-max-episodes explicitly to allow this upload."
         )
 
     is_representative = not preview_all and not episodes
