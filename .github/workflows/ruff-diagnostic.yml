@@ -1,0 +1,22 @@
+name: Ruff diagnostic
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  diff:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-python@v5.6.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6.3.1
+        with:
+          version: "0.9.18"
+      - run: uv venv --python 3.12 .venv
+      - run: uv pip install --python .venv/bin/python ruff==0.12.10
+      - run: .venv/bin/ruff format --check --diff tests/test_manual_readme.py
