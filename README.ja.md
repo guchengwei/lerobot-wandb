@@ -135,7 +135,12 @@ lerobot-train \
   --policy.type=act \
   --policy.device=cuda \
   --output_dir="$TRAIN_OUTPUT" \
+  --job_name="$POLICY_NAME" \
   --steps=100000 \
+  --wandb.enable=true \
+  --wandb.entity="$WANDB_ENTITY" \
+  --wandb.project="$WANDB_PROJECT" \
+  --wandb.disable_artifact=true \
   --policy.push_to_hub=false
 
 lerobot-wandb model upload \
@@ -145,6 +150,8 @@ lerobot-wandb model upload \
   --name "$POLICY_NAME" \
   --alias candidate
 ```
+
+学習 Run とメトリクスは LeRobot 標準の W&B 連携で記録します。`--wandb.disable_artifact=true` を付けて LeRobot 側の checkpoint Artifact 作成は止め、モデル Artifact は続く `lerobot-wandb model upload` で公開します。
 
 checkpoint の配置はポリシーと学習設定で変わります。アップロード前に LeRobot の実際の出力先を確認してください。
 
@@ -216,7 +223,7 @@ lerobot-wandb dataset download \
   --root "$TRAIN_DATASET_ROOT"
 ```
 
-ダウンロードは途中状態を公開しないように処理します。指定した参照を解決し、Artifact を取得して検証した後で `$TRAIN_DATASET_ROOT` に配置します。ダウンロードが完了した後は、LeRobot がそのローカルディレクトリを直接読み込むため、学習中に W&B への接続は必要ありません。
+ダウンロードは途中状態を公開しないように処理します。指定した参照を解決し、Artifact を取得して検証した後で `$TRAIN_DATASET_ROOT` に配置します。ダウンロード完了後、LeRobot はそのローカルディレクトリを直接読み込むため、学習データを読むために W&B 接続は必要ありません。ただし、下記の `--wandb.enable=true` で学習メトリクスを同期する場合は、学習中も W&B への接続が必要です。
 
 alias を指定した場合は、コマンドが表示した解決済みの `vN` 参照を保存してください。
 
@@ -232,10 +239,14 @@ lerobot-train \
   --job_name="$POLICY_NAME" \
   --batch_size=8 \
   --steps=100000 \
+  --wandb.enable=true \
+  --wandb.entity="$WANDB_ENTITY" \
+  --wandb.project="$WANDB_PROJECT" \
+  --wandb.disable_artifact=true \
   --policy.push_to_hub=false
 ```
 
-ここは通常の LeRobot の学習処理です。`lerobot-wandb` は `lerobot-train` をラップせず、学習完了時にモデルを自動公開することもありません。
+ここは通常の LeRobot の学習処理です。`--wandb.*` は LeRobot 標準の W&B 連携で、学習 Run とメトリクスを `$WANDB_ENTITY/$WANDB_PROJECT` に記録します。`--wandb.disable_artifact=true` を付けるのは、LeRobot 側で checkpoint Artifact を重複して作らないためです。モデル Artifact は次の手順で `lerobot-wandb model upload` を使って明示的に公開します。`lerobot-wandb` は `lerobot-train` をラップせず、学習完了時にモデルを自動公開することもありません。
 
 保存済みの学習設定から再開する場合:
 
@@ -325,6 +336,7 @@ lerobot-wandb model promote \
 | --- | --- |
 | 教示データ | ローカルデータセット → W&B `dataset` Artifact |
 | 学習入力 | `$TRAIN_DATASET_ROOT` のローカルディレクトリ |
+| 学習メトリクス | `lerobot-train` が `$WANDB_PROJECT` に作成する W&B Run |
 | 学習済みポリシー | ローカル checkpoint → W&B `model` Artifact |
 | 評価エピソード | ローカルのロールアウトディレクトリ → W&B `rollout` Artifact |
 | データセットからモデルまでの記録 | データセット参照とローカル学習設定 |
@@ -332,7 +344,7 @@ lerobot-wandb model promote \
 
 ## このツールが行わないこと
 
-以前の LeRobot fork には、学習処理の内部へ W&B を組み込む機能がありました。このリポジトリでは、そのフックは再実装していません。
+以前の LeRobot fork には、学習処理の内部へ companion 固有の W&B Artifact 処理を組み込む機能がありました。このリポジトリでは、そのフックは再実装していません。upstream LeRobot 標準の `--wandb.*` による学習ログはそのまま利用できます。
 
 具体的には、次のことは行いません。
 

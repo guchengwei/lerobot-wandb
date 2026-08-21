@@ -135,7 +135,12 @@ lerobot-train \
   --policy.type=act \
   --policy.device=cuda \
   --output_dir="$TRAIN_OUTPUT" \
+  --job_name="$POLICY_NAME" \
   --steps=100000 \
+  --wandb.enable=true \
+  --wandb.entity="$WANDB_ENTITY" \
+  --wandb.project="$WANDB_PROJECT" \
+  --wandb.disable_artifact=true \
   --policy.push_to_hub=false
 
 lerobot-wandb model upload \
@@ -145,6 +150,8 @@ lerobot-wandb model upload \
   --name "$POLICY_NAME" \
   --alias candidate
 ```
+
+LeRobot creates the W&B training Run and logs its training metrics. `--wandb.disable_artifact=true` keeps checkpoint publication out of that Run; the following `lerobot-wandb model upload` remains the model Artifact publication step.
 
 Checkpoint layouts vary by policy and training configuration. Confirm the actual LeRobot output path before uploading a model.
 
@@ -216,7 +223,7 @@ lerobot-wandb dataset download \
   --root "$TRAIN_DATASET_ROOT"
 ```
 
-The download is transactional: the command resolves the requested reference, downloads the Artifact, validates it, and only then places the result at `$TRAIN_DATASET_ROOT`. Once the download finishes, LeRobot reads that local tree directly and does not need a W&B connection for training.
+The download is transactional: the command resolves the requested reference, downloads the Artifact, validates it, and only then places the result at `$TRAIN_DATASET_ROOT`. Once the download finishes, LeRobot reads that local tree directly; W&B is not needed to access the training data. With `--wandb.enable=true` below, the training process still needs W&B connectivity to sync metrics.
 
 If you used an alias, save the resolved `vN` reference printed by the command.
 
@@ -232,10 +239,14 @@ lerobot-train \
   --job_name="$POLICY_NAME" \
   --batch_size=8 \
   --steps=100000 \
+  --wandb.enable=true \
+  --wandb.entity="$WANDB_ENTITY" \
+  --wandb.project="$WANDB_PROJECT" \
+  --wandb.disable_artifact=true \
   --policy.push_to_hub=false
 ```
 
-This is a normal LeRobot training run. `lerobot-wandb` does not wrap it or automatically publish the final checkpoint.
+This is a normal LeRobot training run. The `--wandb.*` flags use LeRobot's built-in W&B integration to log the training Run and metrics to `$WANDB_ENTITY/$WANDB_PROJECT`. `--wandb.disable_artifact=true` prevents LeRobot from also publishing checkpoint Artifacts because this workflow publishes the validated model explicitly in step 5. `lerobot-wandb` does not wrap `lerobot-train` or upload the final checkpoint automatically.
 
 To resume from the saved training configuration:
 
@@ -325,6 +336,7 @@ Promotion moves aliases and can add a Registry link. It does not upload model by
 | --- | --- |
 | Demonstration data | local dataset, then a W&B `dataset` Artifact |
 | Training input | materialized local directory `$TRAIN_DATASET_ROOT` |
+| Training metrics | W&B Run created by `lerobot-train` in `$WANDB_PROJECT` |
 | Trained policy | local checkpoint, then a W&B `model` Artifact |
 | Evaluation episodes | local rollout directory, then a W&B `rollout` Artifact |
 | Dataset → model trace | dataset reference plus local training configuration |
@@ -332,7 +344,7 @@ Promotion moves aliases and can add a Registry link. It does not upload model by
 
 ## What this companion does not do
 
-The historical LeRobot fork included W&B behavior inside the training path. This repository does not reproduce those hooks. In particular, it does not:
+The historical LeRobot fork included companion-specific W&B Artifact behavior inside the training path. This repository does not reproduce those hooks. Upstream LeRobot's native `--wandb.*` training logger still works normally. In particular, this companion does not:
 
 - accept a W&B Artifact reference directly inside `lerobot-train`;
 - materialize a dataset from inside the training command;

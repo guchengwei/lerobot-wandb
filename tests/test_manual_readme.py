@@ -174,6 +174,10 @@ def test_readme_train_example_uses_the_upstream_dataset_root_and_checkpoint_layo
     for marker in (
         '--dataset.repo_id="local/$DATASET_NAME"',
         '--dataset.root="$TRAIN_DATASET_ROOT"',
+        "--wandb.enable=true",
+        '--wandb.entity="$WANDB_ENTITY"',
+        '--wandb.project="$WANDB_PROJECT"',
+        "--wandb.disable_artifact=true",
         'export POLICY_ROOT="$TRAIN_OUTPUT/checkpoints/last/pretrained_model"',
         '--root "$POLICY_ROOT"',
     ):
@@ -226,14 +230,16 @@ def test_materialized_data_requires_a_completed_artifact_download():
         "validate local directories before upload and after download",
         "Once the download finishes",
         "reads that local tree directly",
-        "does not need a W&B connection for training",
+        "W&B is not needed to access the training data",
+        "training process still needs W&B connectivity to sync metrics",
     ):
         assert marker in english, marker
     for marker in (
         "アップロード前とダウンロード後にローカルディレクトリを検証",
-        "ダウンロードが完了した後は",
+        "ダウンロード完了後",
         "ローカルディレクトリを直接読み込む",
-        "学習中に W&B への接続は必要ありません",
+        "学習データを読むために W&B 接続は必要ありません",
+        "学習中も W&B への接続が必要です",
     ):
         assert marker in japanese, marker
 
