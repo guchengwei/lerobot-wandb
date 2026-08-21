@@ -2,7 +2,7 @@
 
 [日本語](./README.ja.md)
 
-`lerobot-wandb` moves LeRobot datasets, trained policies, and rollout results through Weights & Biases Artifacts without patching upstream [LeRobot](https://github.com/huggingface/lerobot).
+`lerobot-wandb` stores and retrieves LeRobot datasets, trained policies, and rollout results as Weights & Biases Artifacts without modifying upstream [LeRobot](https://github.com/huggingface/lerobot).
 
 ![LeRobot and W&B workflow overview](./assets/wandb-workflow-overview-en.jpg)
 
@@ -21,7 +21,7 @@ It can:
 - attach rollout results to the model version used for evaluation; and
 - promote an evaluated model with aliases or a W&B Registry link.
 
-The ownership boundary is intentionally simple. This is a separate distribution, not a native LeRobot plugin:
+LeRobot and `lerobot-wandb` own different parts of the workflow. `lerobot-wandb` is a separate distribution, not a native LeRobot plugin:
 
 - Python distribution: `lerobot-wandb`
 - import package: `lerobot_wandb`
@@ -82,7 +82,7 @@ lerobot-wandb --help
 
 `feetech` is included here because the examples below use an SO-101. Choose the LeRobot extra required by your own hardware. For FFmpeg, PyTorch, and other platform-specific setup, follow the upstream [LeRobot installation guide](https://huggingface.co/docs/lerobot/installation).
 
-LeRobot is deliberately not a hard dependency of the base package. That prevents package resolution from replacing an existing LeRobot installation. LeRobot-dependent commands check the installed version at runtime. `--allow-unsupported-lerobot` can bypass the supported-version check for experiments, but it does not make an unsupported version compatible.
+The base package does not declare LeRobot as a hard dependency, so installing the companion does not ask the resolver to replace an existing LeRobot installation. Commands that need LeRobot check its installed version at runtime. `--allow-unsupported-lerobot` bypasses the supported-version check for experiments, but it does not make an unsupported version compatible.
 
 ## Uninstall
 
@@ -99,7 +99,7 @@ Package uninstall does not delete local datasets, downloaded or materialized Art
 
 ## Configure the workflow examples
 
-The commands below reuse a small set of names and paths. Set them once for your project:
+The examples use the same W&B names and local paths throughout. Set them once for your project:
 
 ```bash
 export WANDB_ENTITY="your-wandb-entity"
@@ -150,7 +150,7 @@ Checkpoint layouts vary by policy and training configuration. Confirm the actual
 
 ## Full workflow
 
-The Artifact workflow is hardware-independent. The robot-facing commands below use SO-101 only as a concrete LeRobot example.
+The W&B steps are the same regardless of robot. The LeRobot commands below use SO-101 as a concrete example.
 
 ### 1. Record demonstrations with LeRobot
 
@@ -306,7 +306,7 @@ lerobot-wandb rollout upload \
   --episodes-succeeded "$EPISODES_SUCCEEDED"
 ```
 
-Success is supplied by the evaluator; the companion does not infer task success. The rollout is stored as a separate `rollout` Artifact and records the evaluated model as a lineage input. Canonical rollout videos remain unchanged; when video is present, a deterministic H.264/yuv420p derivative is logged as Run Media for browser playback.
+You enter the number of successful episodes; `lerobot-wandb` does not decide whether an episode succeeded. The rollout is stored as a separate `rollout` Artifact and records the evaluated model as a lineage input. Canonical rollout videos remain unchanged; when video is present, a deterministic H.264/yuv420p derivative is logged as Run Media for browser playback.
 
 ### 7. Promote the evaluated model
 
@@ -340,8 +340,6 @@ The historical LeRobot fork included W&B behavior inside the training path. This
 - replace `lerobot-record`, `lerobot-train`, or `lerobot-rollout`;
 - monkey-patch LeRobot or install files into the `lerobot` package; or
 - act as a streaming recorder or deployment controller.
-
-Those boundaries keep the companion usable beside an ordinary upstream LeRobot installation.
 
 ## Troubleshooting
 
