@@ -114,10 +114,10 @@ def test_readmes_document_safe_companion_uninstall():
             REPO_ROOT / "README.ja.md",
             "アンインストール",
             (
-                "LeRobot はインストールされたままで、変更されません",
-                "ローカルの dataset",
-                "W&B 上の Artifact、Run、Registry object は削除しません",
-                "W&B の認証情報や設定も削除しません",
+                "LeRobot 自体は削除も変更もされません",
+                "ローカルのデータセット",
+                "W&B 上の Artifact、Run、Registry object も削除しません",
+                "W&B の認証情報や設定もそのまま残ります",
             ),
         ),
     )
@@ -207,7 +207,7 @@ def test_readmes_describe_structural_model_checks_only():
         assert marker in english, marker
     for marker in (
         "必要な設定ファイルと重みファイル",
-        "重みのロードや実行は行わない",
+        "重みをロードしたり実行したりはしません",
         "ポリシー固有の検証は別途実施",
     ):
         assert marker in japanese, marker
@@ -231,9 +231,9 @@ def test_materialized_data_requires_a_completed_artifact_download():
         assert marker in english, marker
     for marker in (
         "アップロード前とダウンロード後にローカルディレクトリを検証",
-        "ダウンロードが終われば",
-        "ローカルディレクトリを直接読む",
-        "W&B への接続は不要",
+        "ダウンロードが完了した後は",
+        "ローカルディレクトリを直接読み込む",
+        "学習中に W&B への接続は必要ありません",
     ):
         assert marker in japanese, marker
 
@@ -252,10 +252,10 @@ def test_overview_and_companion_boundaries_are_explicit():
         assert marker in english, marker
     for marker in (
         "LeRobot と W&B を組み合わせた全体の流れ",
-        "記録・学習・ロールアウトの前後にある Artifact 操作",
-        "ロボットを動かすコマンドには通常の LeRobot",
-        "この companion が行わないこと",
-        "その hook を意図的に再実装していません",
-        "streaming recorder や deployment controller",
+        "記録・学習・ロールアウトの前後で Artifact を扱う",
+        "ロボットを動かすコマンドは LeRobot",
+        "このツールが行わないこと",
+        "そのフックは再実装していません",
+        "ストリーミングレコーダーやデプロイメントコントローラー",
     ):
         assert marker in japanese, marker
