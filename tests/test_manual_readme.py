@@ -174,10 +174,10 @@ def test_readme_train_example_uses_the_upstream_dataset_root_and_checkpoint_layo
     for marker in (
         '--dataset.repo_id="local/$DATASET_NAME"',
         '--dataset.root="$TRAIN_DATASET_ROOT"',
-        '--wandb.enable=true',
+        "--wandb.enable=true",
         '--wandb.entity="$WANDB_ENTITY"',
         '--wandb.project="$WANDB_PROJECT"',
-        '--wandb.disable_artifact=true',
+        "--wandb.disable_artifact=true",
         'export POLICY_ROOT="$TRAIN_OUTPUT/checkpoints/last/pretrained_model"',
         '--root "$POLICY_ROOT"',
     ):
