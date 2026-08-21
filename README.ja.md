@@ -151,7 +151,7 @@ lerobot-wandb model upload \
   --alias candidate
 ```
 
-学習 Run とメトリクスは LeRobot 標準の W&B 連携で記録します。`--wandb.disable_artifact=true` を付けて LeRobot 側の checkpoint Artifact 作成は止め、モデル Artifact は続く `lerobot-wandb model upload` で公開します。
+学習 Run とメトリクスは LeRobot 標準の W&B 連携で記録します。LeRobot 0.6.1 には checkpoint を W&B Artifact として保存する機能もありますが、通常の checkpoint Artifact は後工程で使う完全なポリシーディレクトリではありません。この例ではその保存を無効にし、代わりに `$POLICY_ROOT` 全体を `lerobot-wandb model upload` で公開します。
 
 checkpoint の配置はポリシーと学習設定で変わります。アップロード前に LeRobot の実際の出力先を確認してください。
 
@@ -246,7 +246,7 @@ lerobot-train \
   --policy.push_to_hub=false
 ```
 
-ここは通常の LeRobot の学習処理です。`--wandb.*` は LeRobot 標準の W&B 連携で、学習 Run とメトリクスを `$WANDB_ENTITY/$WANDB_PROJECT` に記録します。`--wandb.disable_artifact=true` を付けるのは、LeRobot 側で checkpoint Artifact を重複して作らないためです。モデル Artifact は次の手順で `lerobot-wandb model upload` を使って明示的に公開します。`lerobot-wandb` は `lerobot-train` をラップせず、学習完了時にモデルを自動公開することもありません。
+ここは通常の LeRobot の学習処理です。`--wandb.*` は LeRobot 標準の W&B 連携で、学習 Run とメトリクスを `$WANDB_ENTITY/$WANDB_PROJECT` に記録します。LeRobot 0.6.1 は checkpoint Artifact も W&B にアップロードできます。ただし通常の checkpoint Artifact に含まれるのは重みだけで、`config.json` を含む完全なポリシーディレクトリではありません。そこでこの例では `--wandb.disable_artifact=true` でそのアップロードを止め、次の手順で `$POLICY_ROOT` 全体を `lerobot-wandb model upload` に渡します。以後のダウンロード、ロールアウトの lineage、alias、Registry への登録には、こちらの Artifact を使います。`lerobot-wandb` は `lerobot-train` をラップせず、学習完了時にモデルを自動公開することもありません。
 
 保存済みの学習設定から再開する場合:
 
