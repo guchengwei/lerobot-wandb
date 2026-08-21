@@ -246,7 +246,7 @@ lerobot-train \
   --policy.push_to_hub=false
 ```
 
-This is a normal LeRobot training run. The `--wandb.*` flags use LeRobot's built-in W&B integration to log the Run and metrics to `$WANDB_ENTITY/$WANDB_PROJECT`. LeRobot 0.6.1 can also upload checkpoint Artifacts, but a standard checkpoint Artifact contains the weights without the full policy directory, including `config.json`. That is why this example sets `--wandb.disable_artifact=true`: step 5 uploads the complete `$POLICY_ROOT` instead, and that Artifact is the one used for download, rollout lineage, aliases, and Registry promotion. `lerobot-wandb` does not wrap `lerobot-train` or upload checkpoints automatically.
+This is a normal LeRobot training run. The `--wandb.*` flags use LeRobot's built-in W&B integration to log the Run and metrics to `$WANDB_ENTITY/$WANDB_PROJECT`. LeRobot 0.6.1 can also upload checkpoint Artifacts, but a standard checkpoint Artifact contains the weights, not the full policy directory; `config.json` is not included. That is why this example sets `--wandb.disable_artifact=true`: step 5 uploads the complete `$POLICY_ROOT` instead, and that Artifact is the one used for download, rollout lineage, aliases, and Registry promotion. `lerobot-wandb` does not wrap `lerobot-train` or upload checkpoints automatically.
 
 To resume from the saved training configuration:
 
