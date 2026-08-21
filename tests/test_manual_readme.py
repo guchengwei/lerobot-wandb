@@ -169,15 +169,11 @@ def test_user_docs_frame_lerobot_wandb_as_a_companion_alongside_upstream_lerobot
         assert "portable" not in text.lower()
 
 
-def test_readme_train_example_uses_upstream_dataset_wandb_and_checkpoint_layout():
+def test_readme_train_example_uses_the_upstream_dataset_root_and_checkpoint_layout():
     readme = (REPO_ROOT / "README.md").read_text()
     for marker in (
         '--dataset.repo_id="local/$DATASET_NAME"',
         '--dataset.root="$TRAIN_DATASET_ROOT"',
-        '--wandb.enable=true',
-        '--wandb.entity="$WANDB_ENTITY"',
-        '--wandb.project="$WANDB_PROJECT"',
-        '--wandb.disable_artifact=true',
         'export POLICY_ROOT="$TRAIN_OUTPUT/checkpoints/last/pretrained_model"',
         '--root "$POLICY_ROOT"',
     ):
@@ -223,23 +219,21 @@ def test_readmes_describe_structural_model_checks_only():
             assert marker not in text, marker
 
 
-def test_materialized_data_distinguishes_local_access_from_wandb_metric_sync():
+def test_materialized_data_requires_a_completed_artifact_download():
     english = " ".join((REPO_ROOT / "README.md").read_text().split())
     japanese = " ".join((REPO_ROOT / "README.ja.md").read_text().split())
     for marker in (
         "validate local directories before upload and after download",
         "Once the download finishes",
         "reads that local tree directly",
-        "W&B is not needed to access the training data",
-        "training process still needs W&B connectivity to sync metrics",
+        "does not need a W&B connection for training",
     ):
         assert marker in english, marker
     for marker in (
         "アップロード前とダウンロード後にローカルディレクトリを検証",
-        "ダウンロード完了後",
+        "ダウンロードが完了した後は",
         "ローカルディレクトリを直接読み込む",
-        "学習データを読むために W&B 接続は必要ありません",
-        "学習中も W&B への接続が必要です",
+        "学習中に W&B への接続は必要ありません",
     ):
         assert marker in japanese, marker
 
