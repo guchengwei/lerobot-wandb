@@ -151,7 +151,7 @@ lerobot-wandb model upload \
   --alias candidate
 ```
 
-LeRobot creates the W&B training Run and logs its training metrics. `--wandb.disable_artifact=true` keeps checkpoint publication out of that Run; the following `lerobot-wandb model upload` remains the model Artifact publication step.
+LeRobot creates the W&B training Run and logs its training metrics. LeRobot 0.6.1 can also upload checkpoint Artifacts, but those are checkpoint snapshots rather than the complete policy directory used by the rest of this workflow. This example disables that upload and publishes `$POLICY_ROOT` with `lerobot-wandb` instead.
 
 Checkpoint layouts vary by policy and training configuration. Confirm the actual LeRobot output path before uploading a model.
 
@@ -246,7 +246,7 @@ lerobot-train \
   --policy.push_to_hub=false
 ```
 
-This is a normal LeRobot training run. The `--wandb.*` flags use LeRobot's built-in W&B integration to log the training Run and metrics to `$WANDB_ENTITY/$WANDB_PROJECT`. `--wandb.disable_artifact=true` prevents LeRobot from also publishing checkpoint Artifacts because this workflow publishes the validated model explicitly in step 5. `lerobot-wandb` does not wrap `lerobot-train` or upload the final checkpoint automatically.
+This is a normal LeRobot training run. The `--wandb.*` flags use LeRobot's built-in W&B integration to log the Run and metrics to `$WANDB_ENTITY/$WANDB_PROJECT`. LeRobot 0.6.1 can also upload checkpoint Artifacts, but a standard checkpoint Artifact contains the weights without the full policy directory, including `config.json`. That is why this example sets `--wandb.disable_artifact=true`: step 5 uploads the complete `$POLICY_ROOT` instead, and that Artifact is the one used for download, rollout lineage, aliases, and Registry promotion. `lerobot-wandb` does not wrap `lerobot-train` or upload checkpoints automatically.
 
 To resume from the saved training configuration:
 
