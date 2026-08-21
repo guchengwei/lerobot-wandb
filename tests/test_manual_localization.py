@@ -44,6 +44,7 @@ def test_readmes_keep_language_specific_assets_and_cross_links():
 
 def test_japanese_training_boundary_matches_the_upstream_companion_scope():
     japanese = " ".join((REPO_ROOT / "README.ja.md").read_text().split())
-    assert "通常の LeRobot 学習" in japanese
-    assert "companion はコマンドをラップせず" in japanese
+    assert "### 4. LeRobot で学習する" in japanese
+    assert "`lerobot-wandb` は `lerobot-train` をラップせず" in japanese
+    assert "学習完了時にモデルを自動公開することもありません" in japanese
     assert "ロボットの制御ループには入りません" in japanese
