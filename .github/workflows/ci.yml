@@ -70,6 +70,22 @@ jobs:
       - run: uv pip check --python .venv/bin/python
       - run: .venv/bin/lerobot-wandb --help
       - run: .venv/bin/python -c 'import lerobot_wandb; print(lerobot_wandb.__version__)'
+      - name: uninstall built wheel with documented uv route
+        run: |
+          uv pip uninstall --python .venv/bin/python lerobot-wandb
+          test ! -e .venv/bin/lerobot-wandb
+          .venv/bin/python - <<'PY'
+          import importlib.metadata as metadata
+          import importlib.util
+
+          assert importlib.util.find_spec("lerobot_wandb") is None
+          try:
+              metadata.distribution("lerobot-wandb")
+          except metadata.PackageNotFoundError:
+              pass
+          else:
+              raise SystemExit("lerobot-wandb distribution metadata survived uninstall")
+          PY
       - name: fresh built wheel [lerobot] install
         run: LEROBOT_VERSION=0.6.1 PYTHON_BIN=.venv/bin/python bash scripts/fresh_extra_smoke.sh dist/*.whl
 

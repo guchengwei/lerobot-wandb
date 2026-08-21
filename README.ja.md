@@ -82,6 +82,19 @@ lerobot-wandb --help
 
 基本パッケージでは LeRobot を hard dependency にしていません。依存関係の解決時に、既存の upstream LeRobot を別バージョンへ置き換えないためです。LeRobot を必要とするコマンドは、実行時にインストール済みバージョンを確認します。`--allow-unsupported-lerobot` は実験用の回避オプションであり、互換性を保証するものではありません。
 
+## アンインストール
+
+インストール時と同じ LeRobot 環境を有効化し、パッケージマネージャーで companion だけを削除します。
+
+```bash
+source /path/to/lerobot/.venv/bin/activate
+uv pip uninstall lerobot-wandb
+```
+
+削除されるのは `lerobot-wandb` distribution、`lerobot_wandb` import package、`lerobot-wandb` console command だけです。LeRobot はインストールされたままで、変更されません。`wandb`、`datasets`、`pandas` などの共有依存パッケージも自動では削除しません。
+
+アンインストールしても、ローカルの dataset、download または materialize 済み Artifact、model、rollout directory、training output、sidecar metadata などのユーザーデータは削除しません。また、W&B 上の Artifact、Run、Registry object は削除しません。W&B の認証情報や設定も削除しません。
+
 以下の例で使う W&B 上の名前を先に設定し、その後の手順では同じ変数を使います。
 
 ```bash

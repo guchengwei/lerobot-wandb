@@ -14,6 +14,7 @@
 """Public documentation contract for the LeRobot companion READMEs."""
 
 import re
+import shlex
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parents[1]
@@ -95,6 +96,63 @@ def test_english_readme_documents_the_companion_command_route():
     )
     for marker in required_markers:
         assert marker in english, marker
+
+
+def test_readmes_document_safe_companion_uninstall():
+    cases = (
+        (
+            REPO_ROOT / "README.md",
+            "Uninstall",
+            (
+                "LeRobot remains installed and is not modified",
+                "does not delete local datasets",
+                "does not delete remote W&B Artifacts",
+                "does not remove W&B authentication or configuration",
+            ),
+        ),
+        (
+            REPO_ROOT / "README.ja.md",
+            "アンインストール",
+            (
+                "LeRobot はインストールされたままで、変更されません",
+                "ローカルの dataset",
+                "W&B 上の Artifact、Run、Registry object は削除しません",
+                "W&B の認証情報や設定も削除しません",
+            ),
+        ),
+    )
+    uninstall_prefixes = (
+        ("uv", "pip", "uninstall"),
+        ("pip", "uninstall"),
+        ("python", "-m", "pip", "uninstall"),
+    )
+
+    for path, heading, required_markers in cases:
+        text = path.read_text()
+        match = re.search(
+            rf"^## {re.escape(heading)}\s*$\n(?P<section>.*?)(?=^## |\Z)",
+            text,
+            flags=re.MULTILINE | re.DOTALL,
+        )
+        assert match, f"missing {heading!r} section in {path.name}"
+        section = match.group("section")
+
+        assert "uv pip uninstall lerobot-wandb" in section
+        for marker in required_markers:
+            assert marker in section, (path.name, marker)
+
+        bash_blocks = re.findall(r"```bash\n(.*?)```", section, flags=re.DOTALL)
+        assert bash_blocks, f"missing bash uninstall example in {path.name}"
+        for block in bash_blocks:
+            for line in block.splitlines():
+                tokens = shlex.split(line)
+                for prefix in uninstall_prefixes:
+                    if tuple(tokens[: len(prefix)]) != prefix:
+                        continue
+                    targets = [token for token in tokens[len(prefix) :] if not token.startswith("-")]
+                    assert "lerobot" not in targets, (
+                        f"{path.name} must not recommend uninstalling LeRobot: {line!r}"
+                    )
 
 
 def test_user_docs_frame_lerobot_wandb_as_a_companion_alongside_upstream_lerobot():
