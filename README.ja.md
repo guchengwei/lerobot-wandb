@@ -95,7 +95,7 @@ uv pip uninstall lerobot-wandb
 
 アンインストールしても、ローカルの dataset、download または materialize 済み Artifact、model、rollout directory、training output、sidecar metadata などのユーザーデータは削除しません。また、W&B 上の Artifact、Run、Registry object は削除しません。W&B の認証情報や設定も削除しません。
 
-## ワークフロー例の設定
+## ワークフローの設定例
 
 以下の例で使う W&B 上の名前を先に設定し、その後の手順では同じ変数を使います。
 
