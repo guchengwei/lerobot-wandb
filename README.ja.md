@@ -151,7 +151,7 @@ lerobot-wandb model upload \
   --alias candidate
 ```
 
-学習 Run とメトリクスは LeRobot 標準の W&B 連携で記録します。LeRobot 0.6.1 には checkpoint を W&B Artifact として保存する機能もありますが、通常の checkpoint Artifact は後工程で使う完全なポリシーディレクトリではありません。この例ではその保存を無効にし、代わりに `$POLICY_ROOT` 全体を `lerobot-wandb model upload` で公開します。
+学習 Run とメトリクスは LeRobot 標準の W&B 連携で記録します。LeRobot 0.6.1 には checkpoint を W&B Artifact として保存する機能もありますが、通常の checkpoint Artifact は後の手順で使う完全なポリシーディレクトリではありません。この例ではその保存を無効にし、代わりに `$POLICY_ROOT` 全体を `lerobot-wandb model upload` で公開します。
 
 checkpoint の配置はポリシーと学習設定で変わります。アップロード前に LeRobot の実際の出力先を確認してください。
 
