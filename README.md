@@ -95,6 +95,8 @@ This removes only the `lerobot-wandb` distribution, the `lerobot_wandb` import p
 
 Uninstalling the companion does not delete local datasets, downloaded or materialized Artifacts, models, rollout directories, training outputs, sidecar metadata, or other user data. It also does not delete remote W&B Artifacts, Runs, or Registry objects, and it does not remove W&B authentication or configuration.
 
+## Configure the workflow examples
+
 Set the W&B object names used by the examples once, then reuse them throughout the workflow:
 
 ```bash
