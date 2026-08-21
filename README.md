@@ -2,56 +2,58 @@
 
 [日本語](./README.ja.md)
 
-Move LeRobot datasets, trained policies, and rollout results through Weights & Biases Artifacts without replacing or patching upstream [LeRobot](https://github.com/huggingface/lerobot).
+`lerobot-wandb` moves LeRobot datasets, trained policies, and rollout results through Weights & Biases Artifacts without patching upstream [LeRobot](https://github.com/huggingface/lerobot).
 
 ![LeRobot and W&B workflow overview](./assets/wandb-workflow-overview-en.jpg)
 
 The diagram shows the full LeRobot and W&B workflow. `lerobot-wandb` handles the Artifact steps around recording, training, and rollout; the robot-facing commands remain standard LeRobot commands.
 
-## What this package does
+## What it is
 
-`lerobot-wandb` is a companion CLI for an existing LeRobot installation. It gives local LeRobot directories a versioned W&B lifecycle:
+`lerobot-wandb` is a companion CLI for an existing LeRobot installation. It adds Artifact transfer and validation around a normal LeRobot workflow rather than replacing LeRobot itself.
+
+It can:
 
 - upload and download datasets, models, and rollout datasets as W&B Artifacts;
 - validate local directories before upload and after download;
-- create browser-playable dataset and rollout previews without changing the canonical video files;
-- record requested and resolved Artifact references for reproducibility;
-- connect rollout results to the exact model version that produced them; and
-- promote an evaluated model version with an alias or a W&B Registry link.
+- create browser-playable review previews without changing canonical video files;
+- record both requested Artifact references and the immutable versions they resolve to;
+- attach rollout results to the model version used for evaluation; and
+- promote an evaluated model with aliases or a W&B Registry link.
 
-It is a separate distribution, not a native LeRobot plugin:
+The ownership boundary is intentionally simple. This is a separate distribution, not a native LeRobot plugin:
 
-- distribution: `lerobot-wandb`
-- Python package: `lerobot_wandb`
-- command: `lerobot-wandb`
+- Python distribution: `lerobot-wandb`
+- import package: `lerobot_wandb`
+- console command: `lerobot-wandb`
 
-## How it fits with LeRobot
+LeRobot continues to own robot control, recording, training, and policy execution.
 
-| Step | Command | Owner |
+| Task | Command | Owner |
 | --- | --- | --- |
-| Record demonstrations | `lerobot-record` | upstream LeRobot |
-| Upload or download a dataset | `lerobot-wandb dataset ...` | this companion |
-| Train a policy | `lerobot-train` | upstream LeRobot |
-| Upload, download, or promote a policy | `lerobot-wandb model ...` | this companion |
-| Run a policy on the robot | `lerobot-rollout` | upstream LeRobot |
-| Publish rollout results | `lerobot-wandb rollout upload` | this companion |
+| Record demonstrations | `lerobot-record` | LeRobot |
+| Upload or download a dataset | `lerobot-wandb dataset ...` | `lerobot-wandb` |
+| Train a policy | `lerobot-train` | LeRobot |
+| Upload, download, or promote a model | `lerobot-wandb model ...` | `lerobot-wandb` |
+| Run a policy on the robot | `lerobot-rollout` | LeRobot |
+| Publish rollout results | `lerobot-wandb rollout upload` | `lerobot-wandb` |
 
-The handoff is always a local directory. W&B stores finished Artifacts; it is not part of the robot control loop.
+The handoff between the two tools is a local directory. W&B stores completed Artifacts; it is not part of the robot control loop.
 
 ## Requirements
 
 - Python 3.12 or later
-- a W&B account and network access for Artifact operations
+- a W&B account and network access when reading or writing Artifacts
 - upstream LeRobot `>=0.6.1,<0.6.2` for commands that inspect LeRobot datasets or videos
-- the normal robot, camera, and video dependencies required by your LeRobot setup
+- the system, robot, camera, and video dependencies required by your LeRobot setup
 
 The current package version is `0.1.0`. It has not been published to PyPI yet, so install it from GitHub.
 
 ## Install
 
-Install `lerobot-wandb` into the **same Python environment as LeRobot**. LeRobot-dependent companion commands import LeRobot from the active environment.
+Install `lerobot-wandb` into the same Python environment as LeRobot. Commands that inspect LeRobot data import LeRobot from that environment.
 
-For example, if your LeRobot checkout uses `.venv`:
+If you already have a LeRobot checkout with `.venv`:
 
 ```bash
 source /path/to/lerobot/.venv/bin/activate
@@ -60,7 +62,7 @@ wandb login
 lerobot-wandb --help
 ```
 
-For a fresh setup, use LeRobot's `uv` environment pattern and install both packages into one `.venv`:
+For a new workspace, create one environment and install both packages into it:
 
 ```bash
 mkdir lerobot-workspace
@@ -78,26 +80,26 @@ lerobot-info
 lerobot-wandb --help
 ```
 
-`feetech` supplies the motor dependencies for the SO-101 example below. Replace it with the extra required by your robot. Follow the upstream [LeRobot installation guide](https://huggingface.co/docs/lerobot/installation) for system packages such as FFmpeg and for platform-specific PyTorch instructions.
+`feetech` is included here because the examples below use an SO-101. Choose the LeRobot extra required by your own hardware. For FFmpeg, PyTorch, and other platform-specific setup, follow the upstream [LeRobot installation guide](https://huggingface.co/docs/lerobot/installation).
 
-The base package does not declare LeRobot as a hard dependency. This avoids replacing an existing upstream installation during dependency resolution. At runtime, LeRobot-dependent commands check the installed version and explain how to proceed when it is missing or unsupported. `--allow-unsupported-lerobot` is available for experiments, but it is not a compatibility guarantee.
+LeRobot is deliberately not a hard dependency of the base package. That prevents package resolution from replacing an existing LeRobot installation. LeRobot-dependent commands check the installed version at runtime. `--allow-unsupported-lerobot` can bypass the supported-version check for experiments, but it does not make an unsupported version compatible.
 
 ## Uninstall
 
-Activate the same LeRobot environment and remove the companion with the package manager used for installation:
+Activate the LeRobot environment and remove only the companion package:
 
 ```bash
 source /path/to/lerobot/.venv/bin/activate
 uv pip uninstall lerobot-wandb
 ```
 
-This removes only the `lerobot-wandb` distribution, the `lerobot_wandb` import package, and the `lerobot-wandb` console command. LeRobot remains installed and is not modified. Shared dependencies such as `wandb`, `datasets`, and `pandas` are not automatically removed.
+This removes the `lerobot-wandb` distribution, the `lerobot_wandb` import package, and the `lerobot-wandb` console command. LeRobot remains installed and is not modified. Shared dependencies such as `wandb`, `datasets`, and `pandas` are not automatically removed.
 
-Uninstalling the companion does not delete local datasets, downloaded or materialized Artifacts, models, rollout directories, training outputs, sidecar metadata, or other user data. It also does not delete remote W&B Artifacts, Runs, or Registry objects, and it does not remove W&B authentication or configuration.
+Package uninstall does not delete local datasets, downloaded or materialized Artifacts, models, rollout directories, training outputs, sidecar metadata, or other user data. It also does not delete remote W&B Artifacts, Runs, or Registry objects, and it does not remove W&B authentication or configuration.
 
 ## Configure the workflow examples
 
-Set the W&B object names used by the examples once, then reuse them throughout the workflow:
+The commands below reuse a small set of names and paths. Set them once for your project:
 
 ```bash
 export WANDB_ENTITY="your-wandb-entity"
@@ -105,6 +107,7 @@ export WANDB_PROJECT="your-wandb-project"
 export DATASET_NAME="your-dataset"
 export POLICY_NAME="your-policy"
 export ROLLOUT_NAME="your-rollout"
+
 export DATASET_ROOT="./data/$DATASET_NAME"
 export TRAIN_DATASET_ROOT="./datasets/$DATASET_NAME"
 export TRAIN_OUTPUT="./outputs/train/$POLICY_NAME"
@@ -113,13 +116,13 @@ export DOWNLOADED_POLICY_ROOT="./policies/$POLICY_NAME-candidate"
 export ROLLOUT_ROOT="./data/$ROLLOUT_NAME"
 ```
 
-These are examples, not names required by the companion. Set them once for your project; the commands below reuse them.
+These names are examples, not a naming convention enforced by the package.
 
-The examples use Linux and a Bash-compatible shell. On Windows, activate the same LeRobot environment with the matching PowerShell command and replace `/dev/ttyACM*` with your `COM` ports.
+The shell examples assume Linux and Bash. On Windows, activate the same LeRobot environment with the appropriate PowerShell command and replace `/dev/ttyACM*` with the relevant `COM` ports.
 
 ## Quick start: train from a W&B dataset
 
-This is the shortest path when a dataset already exists in W&B:
+If the dataset already exists in W&B, the shortest path is download → train → upload:
 
 ```bash
 lerobot-wandb dataset download \
@@ -143,15 +146,15 @@ lerobot-wandb model upload \
   --alias candidate
 ```
 
-The checkpoint path depends on the policy and training configuration. Confirm the path in the LeRobot training output before uploading it.
+Checkpoint layouts vary by policy and training configuration. Confirm the actual LeRobot output path before uploading a model.
 
-## End-to-end workflow
+## Full workflow
 
-The Artifact workflow is not specific to SO-101. The robot-facing commands below use SO-101 only as a concrete LeRobot example; for another robot, replace the robot, teleoperator, camera, task, and local path arguments while keeping the companion steps the same.
+The Artifact workflow is hardware-independent. The robot-facing commands below use SO-101 only as a concrete LeRobot example.
 
-### 1. Record demonstrations locally
+### 1. Record demonstrations with LeRobot
 
-Recording is a standard upstream LeRobot operation. W&B is not involved yet.
+Recording stays entirely in LeRobot:
 
 ```bash
 lerobot-record \
@@ -165,9 +168,9 @@ lerobot-record \
   --dataset.push_to_hub=false
 ```
 
-`repo_id` is LeRobot's local label. `root` is the directory that the companion will validate and upload.
+`repo_id` is LeRobot's local identifier. `root` is the directory that `lerobot-wandb` will validate and upload.
 
-### 2. Upload the dataset
+### 2. Publish the dataset to W&B
 
 ```bash
 lerobot-wandb dataset upload \
@@ -178,42 +181,34 @@ lerobot-wandb dataset upload \
   --alias raw
 ```
 
-The command validates the dataset before creating the W&B Run, then prints an immutable resolved reference such as:
+The command validates the dataset before starting the W&B Run. After upload it prints the resolved immutable reference, for example:
 
 ```text
 your-wandb-entity/your-wandb-project/your-dataset:v0
 ```
 
-Save that `vN` reference when reproducibility matters. An alias such as `raw` can later point to another version.
+Keep the `vN` reference when reproducibility matters. An alias such as `raw` can move to a later version.
 
-#### Video previews
+#### Dataset video previews
 
-Canonical video files stay inside the Artifact unchanged. Preview media is a separate browser-playable derivative for review.
+Canonical dataset videos are uploaded unchanged. Review previews are separate H.264-compatible derivatives used only for browser playback.
 
-- Default: one deterministic representative episode per camera
-- Exact episodes: repeat `--preview-episode INDEX`
-- All episodes and cameras: `--preview-all`
-- Disable previews: `--no-preview`
+Preview selection:
 
-The Run logs selected review media once, in a stable `dataset_previews` Table with one row per selected episode-camera pair. Use the `episode`, `camera`, and exact `camera_key` columns to filter and group previews; the numeric `episode` column sorts numerically. For example:
+- default: one deterministic representative episode per camera;
+- exact episodes: repeat `--preview-episode INDEX`;
+- every episode and camera: `--preview-all`;
+- no previews: `--no-preview`.
 
-```text
-episode = 12
-camera = front
-camera_key = observation.images.front
-```
+Selected previews are logged once in a `dataset_previews` W&B Table with `episode`, `camera`, and `camera_key` columns. The CLI rejects selections above 10,000 episode-camera rows.
 
-The CLI refuses every selection above 10,000 episode-camera rows, in both interactive and non-interactive environments. Select fewer explicit `--preview-episode` values or use `--no-preview`.
+Preview files are prepared before `wandb.init()`. The CLI reports each selected episode/camera as it is processed, then shows the measured total before upload. The preview budget is `min(250 MiB, 20% of the canonical dataset directory size)`.
 
-Preview preparation runs locally before `wandb.init()`, so no W&B Run exists while the files are being made. The CLI prints the batch size immediately, then shows each selected episode and camera as it starts and finishes (for example, `[1/4] episode 12 · observation.images.front`). During a transcode, it shows a percentage when duration is known; otherwise it reports activity or frame progress without inventing a percentage or ETA. After preparation, it prints the total and `Starting W&B upload...`.
+If the measured previews exceed that budget, an interactive terminal asks for confirmation and defaults to No. In non-interactive environments the command fails unless `--force-preview-budget` is set. That flag only accepts the measured preview-size overage; it does not bypass row limits, dataset validation, episode bounds, encoding failures, temporary-path checks, or W&B upload errors.
 
-The budget formula is unchanged: `min(250 MiB, 20% of the canonical dataset directory bytes)`. After the selected previews are prepared, the CLI compares their measured size with that budget. Preview files are for inspection, not training. If the measured media exceeds the budget, an interactive terminal shows both values and asks for confirmation with `[y/N]` (default **No**). `yes` continues with the already-prepared files; `no`, EOF, or any other response stops before `wandb.init()`.
+Current v3 datasets are supported. Canonical v2.1 datasets can also be uploaded, downloaded, and materialized; v2.1 support is limited to dataset transfer. `rollout upload` requires v3.
 
-In a non-interactive or CI environment, an over-budget upload fails before W&B unless you pass `--force-preview-budget`. Under budget, that flag has no effect; over budget, it approves only the measured preview-byte overage and does not bypass the 10,000-row Table limit, dataset/schema validation, episode-selection bounds, encoding failures, temporary-path safety checks, or W&B upload errors. To avoid an overage, reduce the preview selection (for example, choose fewer `--preview-episode` values instead of `--preview-all`) or use `--no-preview`.
-
-Current v3 datasets are supported. Canonical v2.1 datasets can be uploaded, downloaded, and materialized. For v2.1, support is limited to dataset transfer; `rollout upload` requires v3.
-
-### 3. Download and materialize the dataset
+### 3. Download the training dataset
 
 ```bash
 lerobot-wandb dataset download \
@@ -221,11 +216,11 @@ lerobot-wandb dataset download \
   --root "$TRAIN_DATASET_ROOT"
 ```
 
-The command resolves the requested reference, downloads the Artifact transactionally, validates the result, and writes the dataset to `$TRAIN_DATASET_ROOT`. Once the download finishes, LeRobot reads that local tree directly and does not need a W&B connection for training.
+The download is transactional: the command resolves the requested reference, downloads the Artifact, validates it, and only then places the result at `$TRAIN_DATASET_ROOT`. Once the download finishes, LeRobot reads that local tree directly and does not need a W&B connection for training.
 
-If you requested an alias, record the resolved `vN` reference printed by the command.
+If you used an alias, save the resolved `vN` reference printed by the command.
 
-### 4. Train with upstream LeRobot
+### 4. Train with LeRobot
 
 ```bash
 lerobot-train \
@@ -240,18 +235,18 @@ lerobot-train \
   --policy.push_to_hub=false
 ```
 
-This is an ordinary LeRobot training run. The companion does not wrap the command or publish its final model automatically.
+This is a normal LeRobot training run. `lerobot-wandb` does not wrap it or automatically publish the final checkpoint.
 
-To resume with the saved training configuration:
+To resume from the saved training configuration:
 
 ```bash
 lerobot-train --resume=true \
   --config_path="$POLICY_ROOT/train_config.json"
 ```
 
-Check the actual checkpoint layout before continuing. Adapter-only PEFT or LoRA directories can be stored as Artifacts, but rollout and Registry use require a self-contained policy, such as a merged checkpoint.
+Check the actual checkpoint layout before continuing. Adapter-only PEFT/LoRA directories can be stored as Artifacts, but rollout and Registry workflows need a self-contained policy, such as a merged checkpoint.
 
-### 5. Upload the trained model
+### 5. Publish the trained model
 
 ```bash
 lerobot-wandb model upload \
@@ -262,13 +257,13 @@ lerobot-wandb model upload \
   --alias candidate
 ```
 
-The pre-upload check verifies the expected configuration and weight files. It does not load or execute the weights, so perform any policy-specific validation separately.
+The pre-upload check verifies the expected configuration and weight files. It does not load or execute the weights, so run policy-specific validation separately.
 
-Add `--registry-collection "$POLICY_NAME"` if you also want to link a self-contained model to W&B Registry. A model that is not deployable can still be stored as an Artifact, but it cannot receive a deployable Registry link.
+Add `--registry-collection "$POLICY_NAME"` if you also want to link a self-contained model into W&B Registry. An incomplete or adapter-only model can still be stored as an Artifact, but it should not be promoted as a deployable Registry entry.
 
-### 6. Download the model and publish a rollout
+### 6. Evaluate the model and publish rollouts
 
-Download the candidate on the robot machine:
+Download the candidate onto the robot machine:
 
 ```bash
 lerobot-wandb model download \
@@ -276,13 +271,13 @@ lerobot-wandb model download \
   --root "$DOWNLOADED_POLICY_ROOT"
 ```
 
-Copy the immutable reference printed by the command. Use it for rollout lineage instead of the movable `candidate` alias. The exact `vN` value comes from the upload result, so do not assume `v0`:
+Use the immutable reference printed by the command for evaluation lineage. Do not assume the version is `v0`:
 
 ```bash
 export MODEL_REF="paste-the-resolved-vN-reference-here"
 ```
 
-Run the policy with upstream LeRobot:
+Run the policy with LeRobot:
 
 ```bash
 lerobot-rollout \
@@ -297,7 +292,7 @@ lerobot-rollout \
   --dataset.push_to_hub=false
 ```
 
-Count successful episodes during the evaluation. After disconnecting the robot, publish the result:
+After evaluation, provide the number of successful episodes and upload the rollout dataset:
 
 ```bash
 export EPISODES_SUCCEEDED="14"
@@ -311,7 +306,7 @@ lerobot-wandb rollout upload \
   --episodes-succeeded "$EPISODES_SUCCEEDED"
 ```
 
-The operator supplies the success count; the companion does not score the physical task. The rollout is stored as a separate `rollout` Artifact and declares the evaluated model as a lineage input. Canonical rollout videos remain unchanged. A deterministic H.264/yuv420p derivative is logged as Run Media for browser playback when video is available.
+Success is supplied by the evaluator; the companion does not infer task success. The rollout is stored as a separate `rollout` Artifact and records the evaluated model as a lineage input. Canonical rollout videos remain unchanged; when video is present, a deterministic H.264/yuv420p derivative is logged as Run Media for browser playback.
 
 ### 7. Promote the evaluated model
 
@@ -322,41 +317,41 @@ lerobot-wandb model promote \
   --registry-collection "$POLICY_NAME"
 ```
 
-Promotion moves aliases and optionally adds a Registry link; it does not upload model bytes. Promote the exact version used for evaluation. Re-uploading a downloaded directory would create a new model version without the rollout lineage edge.
+Promotion moves aliases and can add a Registry link. It does not upload model bytes. Promote the exact model version that was evaluated rather than re-uploading a downloaded directory as a new version.
 
-## Resulting W&B objects
+## What gets stored where
 
-| Object | Location |
+| Item | Location |
 | --- | --- |
-| Teaching data | `dataset` Artifact collection `$DATASET_NAME` |
+| Demonstration data | local dataset, then a W&B `dataset` Artifact |
 | Training input | materialized local directory `$TRAIN_DATASET_ROOT` |
-| Trained policy | local checkpoint, then `model` Artifact `$POLICY_NAME` |
-| Evaluation episodes | local rollout tree, then `rollout` Artifact `$ROLLOUT_NAME` |
-| Dataset-to-policy trace | selected dataset reference plus the local training configuration |
-| Policy-to-rollout trace | rollout Run input edge and rollout Artifact metadata |
+| Trained policy | local checkpoint, then a W&B `model` Artifact |
+| Evaluation episodes | local rollout directory, then a W&B `rollout` Artifact |
+| Dataset → model trace | dataset reference plus local training configuration |
+| Model → rollout trace | rollout Run input edge plus rollout Artifact metadata |
 
 ## What this companion does not do
 
-The historical LeRobot fork included W&B behavior inside training. This repository intentionally does not reproduce those hooks. It does not:
+The historical LeRobot fork included W&B behavior inside the training path. This repository does not reproduce those hooks. In particular, it does not:
 
 - accept a W&B Artifact reference directly inside `lerobot-train`;
-- materialize a dataset from within the training command;
+- materialize a dataset from inside the training command;
 - publish the final model on the same training Run;
-- replace upstream `lerobot-record`, `lerobot-train`, or `lerobot-rollout`;
+- replace `lerobot-record`, `lerobot-train`, or `lerobot-rollout`;
 - monkey-patch LeRobot or install files into the `lerobot` package; or
 - act as a streaming recorder or deployment controller.
 
-Keeping these boundaries explicit lets the companion run beside an ordinary upstream LeRobot installation.
+Those boundaries keep the companion usable beside an ordinary upstream LeRobot installation.
 
 ## Troubleshooting
 
-- **LeRobot is missing or unsupported:** make sure you activated the same Python environment that contains LeRobot, then confirm upstream LeRobot `0.6.1` is installed there. Use `--allow-unsupported-lerobot` only after checking compatibility for your environment.
-- **`lerobot-wandb` and `lerobot-*` resolve from different environments:** reactivate the LeRobot virtual environment and install the companion there with `uv pip install`. Keeping both commands in one environment is required for LeRobot-dependent operations.
-- **Preview encoding is unavailable:** add `--no-preview` to dataset upload. Canonical Artifact files are unaffected.
-- **Preview media exceeds the budget:** the prompt defaults to No; answer `yes` to continue with the prepared files. In CI or another non-interactive environment, reduce the selection, use `--no-preview`, or rerun with `--force-preview-budget`; that flag permits only the measured byte overage and leaves the other safeguards in place.
-- **A downloaded alias changed:** use the resolved immutable `vN` reference printed by the command for training records, rollout lineage, and promotion.
-- **A model cannot be linked to Registry:** confirm that the directory contains a complete deployable policy rather than only an adapter.
-- **A command or option differs from this page:** use `lerobot-wandb --help`, the subcommand's `--help`, and `pyproject.toml` as the command reference for this release.
+- **LeRobot is missing or unsupported:** activate the environment that contains LeRobot and confirm that upstream LeRobot `0.6.1` is installed. Use `--allow-unsupported-lerobot` only after checking compatibility yourself.
+- **`lerobot-wandb` and `lerobot-*` resolve from different environments:** reactivate the LeRobot environment and install the companion there with `uv pip install`.
+- **Preview encoding is unavailable:** add `--no-preview` to `dataset upload`. Canonical Artifact files are unaffected.
+- **Preview media exceeds the budget:** reduce the preview selection, use `--no-preview`, or use `--force-preview-budget` in a non-interactive environment when the measured size overage is intentional.
+- **An alias now points to a different version:** use the resolved immutable `vN` reference for training records, rollout lineage, and promotion.
+- **A model cannot be linked to Registry:** check that the directory contains a complete deployable policy rather than only an adapter.
+- **A command differs from this README:** treat `lerobot-wandb --help`, the subcommand `--help`, and `pyproject.toml` as the command reference for the installed release.
 
 ## Development
 
@@ -368,8 +363,8 @@ uv pip install --python .venv/bin/python -e '.[test]'
 .venv/bin/python -m pytest -q
 ```
 
-LeRobot-dependent tests are skipped when LeRobot is absent. The compatibility CI installs supported upstream releases before running those tests. Build checks also confirm that the wheel owns only `lerobot_wandb/*` and the `lerobot-wandb` console entry point.
+LeRobot-dependent tests are skipped when LeRobot is absent. Compatibility CI installs supported upstream releases before running those tests. Build checks also verify that the wheel owns only `lerobot_wandb/*` and the `lerobot-wandb` console entry point.
 
 ## Migration history
 
-This repository is a clean snapshot of the companion Artifact-transfer surface from [guchengwei/lerobot](https://github.com/guchengwei/lerobot), source commit `ebdc227057056e077f90fa10155fd505fa53989d`, created for [issue #46](https://github.com/guchengwei/lerobot/issues/46). See [MIGRATION.md](./MIGRATION.md) for the source boundary and the fork-specific hooks that were left behind.
+This repository was extracted from [guchengwei/lerobot](https://github.com/guchengwei/lerobot) at source commit `ebdc227057056e077f90fa10155fd505fa53989d` as part of [issue #46](https://github.com/guchengwei/lerobot/issues/46). See [MIGRATION.md](./MIGRATION.md) for the exact source boundary and the fork-specific behavior intentionally left behind.
